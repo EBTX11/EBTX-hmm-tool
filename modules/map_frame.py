@@ -286,6 +286,15 @@ class MapFrame(ttk.Frame):
         self._state_btn.pack(side="left", padx=2)
         self._prov_btn = ttk.Button(mode_frame, text="PROVINCE", width=10, command=lambda: self._set_mode(MODE_PROVINCE))
         self._prov_btn.pack(side="left", padx=2)
+        # Mode de selection
+        sel_frame = ttk.Frame(toolbar)
+        sel_frame.pack(side="left", padx=20)
+        ttk.Label(sel_frame, text="Selection:", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 4))
+        self._normal_btn = ttk.Button(sel_frame, text="NORMAL", width=8, command=lambda: self._set_paint_mode(False))
+        self._normal_btn.pack(side="left", padx=2)
+        self._paint_btn = ttk.Button(sel_frame, text="PEINTURE", width=10, command=lambda: self._set_paint_mode(True))
+        self._paint_btn.pack(side="left", padx=2)
+        self._paint_mode_var = tk.BooleanVar(value=False)
         self._status_label = ttk.Label(toolbar, text="Appuie sur 'Charger la carte'", foreground="#888")
         self._status_label.pack(side="left", padx=10)
         main = ttk.Frame(self)
@@ -328,11 +337,17 @@ class MapFrame(ttk.Frame):
         h_add = ttk.Frame(hf)
         h_add.pack(fill="x", pady=2)
         self._hl_var = tk.StringVar()
-        self._hl_combo = ttk.Combobox(h_add, textvariable=self._hl_var, width=14, font=("Consolas", 9))
-        self._hl_combo.pack(side="left", fill="x", expand=True)
-        self._hl_combo.bind("<<ComboboxSelected>>", lambda e: self._add_hc("homeland"))
-        self._hl_combo.bind("<KeyRelease>", self._on_hl_keyrelease)
+        self._hl_entry = tk.Entry(h_add, textvariable=self._hl_var, width=14, font=("Consolas", 9))
+        self._hl_entry.pack(side="left", fill="x", expand=True)
+        self._hl_entry.bind("<KeyRelease>", self._on_hl_keyrelease)
         ttk.Button(h_add, text="+", width=3, command=lambda: self._add_hc("homeland")).pack(side="left", padx=2)
+        # Listbox dans un frame separé pour apparaitre en dessous
+        self._hl_listbox_frame = ttk.Frame(hf)
+        self._hl_listbox_frame.pack(fill="x")
+        self._hl_listbox_frame.pack_forget()
+        self._hl_listbox = tk.Listbox(self._hl_listbox_frame, height=5, font=("Consolas", 9), selectmode="single")
+        self._hl_listbox.pack(fill="x")
+        self._hl_listbox.bind("<<ListboxSelect>>", self._on_hl_select)
 
         ttk.Separator(panel, orient="horizontal").pack(fill="x", pady=3)
         ttk.Label(panel, text="Claim:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
@@ -354,13 +369,8 @@ class MapFrame(ttk.Frame):
         self._info_label = ttk.Label(panel, text="-", font=("Consolas", 8), wraplength=220, justify="left")
         self._info_label.pack(anchor="w", pady=4)
         ttk.Separator(panel, orient="horizontal").pack(fill="x", pady=5)
-        switch_frame = ttk.Frame(panel)
-        switch_frame.pack(fill="x", pady=(0, 4))
-        ttk.Label(switch_frame, text="Mode :", font=("Segoe UI", 9, "bold")).pack(side="left")
-        self._paint_mode_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(switch_frame, text="Peinture", variable=self._paint_mode_var, command=self._on_paint_mode_toggle).pack(side="right")
-        self._paint_status = ttk.Label(switch_frame, text="", font=("Segoe UI", 8, "bold"), foreground="#f9e2af")
-        self._paint_status.pack(side="right", padx=(0, 6))
+        self._paint_status = ttk.Label(panel, text="", font=("Segoe UI", 8, "bold"), foreground="#f9e2af")
+        self._paint_status.pack(anchor="w", pady=(0, 4))
         ttk.Label(panel, text="Transferer vers TAG :", font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self._new_tag = tk.StringVar()
         ttk.Entry(panel, textvariable=self._new_tag, width=10, font=("Consolas", 11)).pack(fill="x", pady=4)
@@ -384,8 +394,12 @@ class MapFrame(ttk.Frame):
         if self._prov_arr is not None:
             self._refresh_render()
 
-    def _on_paint_mode_toggle(self):
-        if self._paint_mode_var.get():
+    def _set_paint_mode(self, paint):
+        self._paint_mode_var.set(paint)
+        self._normal_btn.configure(style="TButton")
+        self._paint_btn.configure(style="TButton")
+        if paint:
+            self._paint_btn.configure(style="Accent.TButton")
             tag = self._new_tag.get().strip().upper()
             if tag and len(tag) >= 2:
                 self._paint_status.config(text=f"Peint. {tag}")
@@ -393,8 +407,9 @@ class MapFrame(ttk.Frame):
                 self._paint_status.config(text="Peint. ?")
             self.winfo_toplevel().config(cursor="crosshair")
         else:
+            self._normal_btn.configure(style="Accent.TButton")
             self._paint_status.config(text="")
-            self.winfo_toplevel().config(cursor="crosshair")
+            self.winfo_toplevel().config(cursor="arrow")
 
     def _refresh_render(self):
         if self._prov_arr is None:
@@ -460,8 +475,8 @@ class MapFrame(ttk.Frame):
             split = sum(1 for s in set(k[0] for k in substates) if len([k for k in substates if k[0] == s]) > 1)
             self._state_hc = parse_homelands_claims(states_path) if states_path and os.path.exists(states_path) else {}
             # Charger les cultures
-            culture_file = os.path.join(DATA_DIR, "cultures", "00_culture.txt")
-            self._cultures = parse_cultures(culture_file)
+            culture_file = os.path.join(DATA_DIR, "cultures", "00_cultures.txt")
+            self._cultures = parse_cultures(culture_file) if os.path.exists(culture_file) else []
             self.after(0, self._init_hl_combo)
             self.after(0, self._display_map)
             self.after(0, lambda: self._status_label.config(
@@ -723,14 +738,26 @@ class MapFrame(ttk.Frame):
 
     def _on_hl_keyrelease(self, event):
         value = self._hl_var.get().lower()
+        self._hl_listbox.delete(0, 'end')
         if value:
             matches = [c for c in self._cultures if c.lower().startswith(value)]
-            self._hl_combo['values'] = matches[:20]
+            for m in matches[:20]:
+                self._hl_listbox.insert('end', m)
+            if matches:
+                self._hl_listbox_frame.pack(fill='x', expand=True)
         else:
-            self._hl_combo['values'] = self._cultures[:20]
+            self._hl_listbox_frame.pack_forget()
+
+    def _on_hl_select(self, event):
+        sel = self._hl_listbox.curselection()
+        if sel:
+            self._hl_var.set(self._hl_listbox.get(sel[0]))
+            self._hl_listbox_frame.pack_forget()
 
     def _init_hl_combo(self):
-        self._hl_combo['values'] = self._cultures[:20]
+        self._hl_listbox.delete(0, 'end')
+        for c in self._cultures[:20]:
+            self._hl_listbox.insert('end', c)
 
     def _add_hc(self, kind):
         state = self._get_selected_state()
