@@ -160,30 +160,65 @@ class PaysFrame(ttk.Frame):
         self._major_tags_status.pack(side="left", padx=10)
 
         base_frame = ttk.LabelFrame(f, text="Défaut (BASE:)")
-        base_frame.pack(fill="x", padx=10, pady=(5, 0))
-        self._base_var = tk.StringVar()
-        ttk.Entry(base_frame, textvariable=self._base_var, width=70).pack(padx=5, pady=5, fill="x")
+        base_frame.pack(fill="x", padx=10, pady=(5, 10))
+
+        base_content = ttk.Frame(base_frame)
+        base_content.pack(fill="x", padx=5, pady=5)
+
+        self._effect_combo = ttk.Combobox(base_content, width=30, state="readonly")
+        self._effect_combo.pack(side="left", padx=5)
+        self._effect_combo_items = [
+            "effect_starting_technology_tier_1_tech_hmm",
+            "effect_starting_technology_tier_2_tech_hmm",
+            "effect_starting_technology_tier_3_tech_hmm",
+            "effect_starting_technology_tier_4_tech_hmm",
+            "effect_starting_technology_tier_1_tech",
+            "effect_starting_technology_tier_2_tech",
+            "effect_starting_technology_tier_3_tech",
+            "effect_starting_technology_tier_4_tech",
+            "effect_starting_technology_tier_5_tech",
+            "effect_starting_technology_tier_6_tech",
+        ]
+        self._effect_combo['values'] = self._effect_combo_items
+
 
         outer = ttk.Frame(f)
         outer.pack(fill="both", expand=True, padx=10, pady=5)
 
-        self._major_canvas = tk.Canvas(outer)
-        scrollbar_y = ttk.Scrollbar(outer, orient="vertical", command=self._major_canvas.yview)
+        hmm_frame = ttk.LabelFrame(outer, text="Technologie HMM")
+        hmm_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
 
-        self._sections_frame = ttk.Frame(self._major_canvas)
-        self._sections_frame.bind(
+        regular_frame = ttk.LabelFrame(outer, text="Technologie Standard")
+        regular_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
+
+        self._hmm_canvas = tk.Canvas(hmm_frame)
+        self._hmm_scrollbar = ttk.Scrollbar(hmm_frame, orient="vertical", command=self._hmm_canvas.yview)
+        self._hmm_sections_frame = ttk.Frame(self._hmm_canvas)
+        self._hmm_sections_frame.bind(
             "<Configure>",
-            lambda e: self._major_canvas.configure(scrollregion=self._major_canvas.bbox("all"))
+            lambda e: self._hmm_canvas.configure(scrollregion=self._hmm_canvas.bbox("all"))
         )
+        self._hmm_canvas_window = self._hmm_canvas.create_window((0, 0), window=self._hmm_sections_frame, anchor="nw")
+        self._hmm_canvas.configure(yscrollcommand=self._hmm_scrollbar.set)
+        self._hmm_canvas.bind("<Configure>", lambda e: self._hmm_canvas.itemconfig(self._hmm_canvas_window, width=e.width))
+        self._hmm_scrollbar.pack(side="right", fill="y")
+        self._hmm_canvas.pack(side="left", fill="both", expand=True)
 
-        self._major_canvas_window = self._major_canvas.create_window((0, 0), window=self._sections_frame, anchor="nw")
-        self._major_canvas.configure(yscrollcommand=scrollbar_y.set)
-        self._major_canvas.bind("<Configure>", lambda e: self._major_canvas.itemconfig(self._major_canvas_window, width=e.width))
+        self._regular_canvas = tk.Canvas(regular_frame)
+        self._regular_scrollbar = ttk.Scrollbar(regular_frame, orient="vertical", command=self._regular_canvas.yview)
+        self._regular_sections_frame = ttk.Frame(self._regular_canvas)
+        self._regular_sections_frame.bind(
+            "<Configure>",
+            lambda e: self._regular_canvas.configure(scrollregion=self._regular_canvas.bbox("all"))
+        )
+        self._regular_canvas_window = self._regular_canvas.create_window((0, 0), window=self._regular_sections_frame, anchor="nw")
+        self._regular_canvas.configure(yscrollcommand=self._regular_scrollbar.set)
+        self._regular_canvas.bind("<Configure>", lambda e: self._regular_canvas.itemconfig(self._regular_canvas_window, width=e.width))
+        self._regular_scrollbar.pack(side="right", fill="y")
+        self._regular_canvas.pack(side="left", fill="both", expand=True)
 
-        scrollbar_y.pack(side="right", fill="y")
-        self._major_canvas.pack(side="left", fill="both", expand=True)
-
-        self._section_data = []
+        self._hmm_section_data = []
+        self._regular_section_data = []
         self._major_tags_filepath = None
 
     def _load_major_tags(self):
@@ -197,9 +232,12 @@ class PaysFrame(ttk.Frame):
             messagebox.showerror("Erreur", f"Fichier introuvable:\n{filepath}")
             return
 
-        for widget in self._sections_frame.winfo_children():
+        for widget in self._hmm_sections_frame.winfo_children():
             widget.destroy()
-        self._section_data = []
+        for widget in self._regular_sections_frame.winfo_children():
+            widget.destroy()
+        self._hmm_section_data = []
+        self._regular_section_data = []
 
         sections = []
         current_header = None
@@ -238,21 +276,48 @@ class PaysFrame(ttk.Frame):
                 return f"effect_starting_technology_tier_{tier}_tech = yes"
             return header.lstrip("# ")
 
+        def is_hmm(effect):
+            return "_tech_hmm" in effect.lower()
+
+        hmm_count = 0
+        regular_count = 0
+
         for header, tags in sections:
             effect = header_to_effect(header)
-            lf = ttk.LabelFrame(self._sections_frame, text=effect)
-            lf.pack(fill="x", padx=5, pady=3)
+            is_hmm_effect = is_hmm(effect)
 
-            txt = tk.Text(lf, height=4, font=("Consolas", 9), wrap="word")
-            txt.pack(fill="both", expand=True, padx=5, pady=3)
-            txt.insert("1.0", "\n".join(tags))
+            if is_hmm_effect:
+                parent_frame = self._hmm_sections_frame
+                lf = ttk.LabelFrame(parent_frame, text=effect)
+                lf.pack(fill="x", padx=5, pady=3)
 
-            self._section_data.append((header, effect, txt))
+                txt = tk.Text(lf, height=4, font=("Consolas", 9), wrap="word")
+                txt.pack(fill="both", expand=True, padx=5, pady=3)
+                txt.insert("1.0", "\n".join(tags))
 
-        self._major_tags_status.config(text=f"{len(sections)} sections chargées")
+                self._hmm_section_data.append((header, effect, txt))
+                hmm_count += 1
+            else:
+                parent_frame = self._regular_sections_frame
+
+                txt = tk.Text(parent_frame, height=4, font=("Consolas", 9), wrap="word")
+                txt.pack(fill="x", padx=5, pady=(3, 0))
+                txt.insert("1.0", "\n".join(tags))
+
+                lf = ttk.LabelFrame(parent_frame, text=effect)
+                lf.pack(fill="x", padx=5, pady=(0, 3))
+                lf.pack_forget()
+
+                self._regular_section_data.append((header, effect, txt, lf))
+                regular_count += 1
+
+        for header, effect, txt, lf in self._regular_section_data:
+            lf.pack(fill="x", padx=5, pady=(3, 0))
+
+        self._major_tags_status.config(text=f"HMM: {hmm_count}, Std: {regular_count}")
 
     def _save_major_tags(self):
-        if not self._major_tags_filepath or not self._section_data:
+        if not self._major_tags_filepath or (not self._hmm_section_data and not self._regular_section_data):
             messagebox.showerror("Erreur", "Chargez d'abord le fichier")
             return
 
@@ -262,7 +327,16 @@ class PaysFrame(ttk.Frame):
             lines.append(f"BASE: {base}")
             lines.append("")
 
-        for header, effect, txt in self._section_data:
+        for header, effect, txt in self._hmm_section_data:
+            lines.append(header)
+            content = txt.get("1.0", "end").strip()
+            for tag in content.split("\n"):
+                tag = tag.strip()
+                if tag:
+                    lines.append(tag)
+            lines.append("")
+
+        for header, effect, txt, lf in self._regular_section_data:
             lines.append(header)
             content = txt.get("1.0", "end").strip()
             for tag in content.split("\n"):
