@@ -186,6 +186,39 @@ def parse_cultures(culture_file):
     return sorted(cultures)
 
 
+def parse_religions(religion_file):
+    """Parse toutes les religions depuis le fichier religion."""
+    religions = []
+    if not os.path.exists(religion_file):
+        return religions
+    with open(religion_file, "r", encoding="utf-8-sig") as fh:
+        content = fh.read()
+    for sm in re.finditer(r'^(\w+)\s*=\s*\{', content, re.MULTILINE):
+        religions.append(sm.group(1))
+    return sorted(religions)
+
+
+def find_next_tag(country_defs_dir):
+    """Trouve le prochain tag EXX libre."""
+    max_num = 0
+    if not os.path.isdir(country_defs_dir):
+        return "E01"
+    for fname in os.listdir(country_defs_dir):
+        if not fname.endswith(".txt"):
+            continue
+        try:
+            with open(os.path.join(country_defs_dir, fname), "r", encoding="utf-8-sig") as fh:
+                content = fh.read()
+            for tm in re.finditer(r'^([A-Z])(\d{2})\s*=\s*\{', content, re.MULTILINE):
+                prefix = tm.group(1)
+                num = int(tm.group(2))
+                if prefix == "E":
+                    max_num = max(max_num, num)
+        except Exception:
+            continue
+    return f"E{max_num + 1:02d}"
+
+
 def build_render(provinces_arr, prov_to_state, prov_owner_map, country_colors, sea_states=None, mode="state"):
     H, W = provinces_arr.shape[:2]
     sea_states = sea_states or set()
@@ -269,6 +302,7 @@ class MapFrame(ttk.Frame):
         self._zoom_at_cache = None
         self._state_hc = {}
         self._cultures = []
+        self._religions = []
         self._build()
 
     def _build(self):
@@ -371,6 +405,7 @@ class MapFrame(ttk.Frame):
         ttk.Separator(panel, orient="horizontal").pack(fill="x", pady=5)
         self._paint_status = ttk.Label(panel, text="", font=("Segoe UI", 8, "bold"), foreground="#f9e2af")
         self._paint_status.pack(anchor="w", pady=(0, 4))
+        ttk.Button(panel, text="Nouveau pays", command=self._open_new_country_popup).pack(fill="x", pady=2)
         ttk.Label(panel, text="Transferer vers TAG :", font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self._new_tag = tk.StringVar()
         ttk.Entry(panel, textvariable=self._new_tag, width=10, font=("Consolas", 11)).pack(fill="x", pady=4)
@@ -477,6 +512,9 @@ class MapFrame(ttk.Frame):
             # Charger les cultures
             culture_file = os.path.join(DATA_DIR, "cultures", "00_cultures.txt")
             self._cultures = parse_cultures(culture_file) if os.path.exists(culture_file) else []
+            # Charger les religions
+            religion_file = os.path.join(DATA_DIR, "religions", "religion.txt")
+            self._religions = parse_religions(religion_file) if os.path.exists(religion_file) else []
             self.after(0, self._init_hl_combo)
             self.after(0, self._display_map)
             self.after(0, lambda: self._status_label.config(
@@ -983,3 +1021,258 @@ class MapFrame(ttk.Frame):
                     lines.append("")
         lines.append(f"{indent}}}")
         return "\n".join(lines)
+
+    def _open_new_country_popup(self):
+            import random
+            state = self._get_selected_state()
+            if not state:
+                messagebox.showwarning("Attention", "Selectionne d'abord un etat pour la capitale")
+                return
+
+            popup = tk.Toplevel(self.winfo_toplevel())
+            popup.title("Nouveau pays")
+            popup.geometry("380x540")
+            popup.configure(bg="#1e2030")
+            popup.grab_set()
+
+            # Style pour le popup
+            style = ttk.Style(popup)
+            style.theme_use('clam')
+
+            # Variables
+            tag_var = tk.StringVar()
+            name_var = tk.StringVar()
+            capital_var = tk.StringVar(value=state)
+            color_var = tk.StringVar(value="120 80 180")
+            country_type_var = tk.StringVar(value="recognized")
+            tier_var = tk.StringVar(value="kingdom")
+            religion_var = tk.StringVar()
+            cultures_var = tk.StringVar()
+            culture_labels = []
+            religion_labels = []
+
+            # ============ TITRE ============
+            title_lbl = tk.Label(popup, text="Nouveau pays", font=("Segoe UI", 14, "bold"), bg="#1e2030", fg="#cba6f7")
+            title_lbl.pack(pady=(15, 10))
+
+            # Container frame
+            cont = tk.Frame(popup, bg="#1e2030")
+            cont.pack(fill="both", expand=True, padx=15)
+
+            # ============ LIGNE 1: TAG + Auto ============
+            row = 0
+            tk.Label(cont, text="TAG:", bg="#1e2030", fg="#cdd6f4", font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=6)
+            tag_entry = ttk.Entry(cont, textvariable=tag_var, width=10, font=("Consolas", 10))
+            tag_entry.grid(row=row, column=1, sticky="w", pady=6)
+            ttk.Button(cont, text="Auto", width=6, command=lambda: self._auto_gen_tag(tag_var)).grid(row=row, column=2, padx=(5, 0), pady=6)
+
+            # ============ LIGNE 2: Nom ============
+            row += 1
+            tk.Label(cont, text="Nom:", bg="#1e2030", fg="#cdd6f4", font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=6)
+            tk.Entry(cont, textvariable=name_var, width=28, bg="#313244", fg="#cdd6f4", insertbackground="#cdd6f4", font=("Consolas", 9)).grid(row=row, column=1, columnspan=2, sticky="w", pady=6)
+
+            # ============ LIGNE 3: Capital ============
+            row += 1
+            tk.Label(cont, text="Capital:", bg="#1e2030", fg="#cdd6f4", font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=6)
+            tk.Entry(cont, textvariable=capital_var, width=20, bg="#313244", fg="#cdd6f4", insertbackground="#cdd6f4", font=("Consolas", 9)).grid(row=row, column=1, columnspan=2, sticky="w", pady=6)
+
+            # ============ LIGNE 4: Couleur + Aleatoire ============
+            row += 1
+            tk.Label(cont, text="Couleur:", bg="#1e2030", fg="#cdd6f4", font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=6)
+            color_frame = tk.Frame(cont, bg="#1e2030")
+            color_frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=6)
+            tk.Entry(color_frame, textvariable=color_var, width=10, bg="#313244", fg="#cdd6f4", insertbackground="#cdd6f4", font=("Consolas", 9)).pack(side="left")
+            ttk.Button(color_frame, text="Aleatoire", command=lambda: self._rand_color(color_var)).pack(side="left", padx=5)
+
+            # ============ LIGNE 5: Country Type ============
+            row += 1
+            tk.Label(cont, text="Type:", bg="#1e2030", fg="#cdd6f4", font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=6)
+            type_combo = ttk.Combobox(cont, textvariable=country_type_var, values=["recognized", "unrecognized", "colonial", "decentralized"], width=18, state="readonly")
+            type_combo.grid(row=row, column=1, columnspan=2, sticky="w", pady=6)
+
+            # ============ LIGNE 6: Tier ============
+            row += 1
+            tk.Label(cont, text="Tier:", bg="#1e2030", fg="#cdd6f4", font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=6)
+            tier_combo = ttk.Combobox(cont, textvariable=tier_var, values=["empire", "hegemony", "kingdom", "grand_principality", "principality", "city_state"], width=18, state="readonly")
+            tier_combo.grid(row=row, column=1, columnspan=2, sticky="w", pady=6)
+
+            # ============ LIGNE 7: Religion ============
+            row += 1
+            tk.Label(cont, text="Religion:", bg="#1e2030", fg="#cdd6f4", font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=6)
+            rel_frame = tk.Frame(cont, bg="#1e2030")
+            rel_frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=6)
+            rel_entry = tk.Entry(rel_frame, textvariable=religion_var, width=14, bg="#313244", fg="#cdd6f4", insertbackground="#cdd6f4", font=("Consolas", 9))
+            rel_entry.pack(side="left")
+            rel_entry.bind("<KeyRelease>", lambda e: self._filter_popup(e, self._religions, rel_listbox, religion_var, rel_lb_frame))
+            tk.Button(rel_frame, text="+", bg="#45475a", fg="#cdd6f4", width=3, command=lambda: self._add_to_list(religion_var, religion_labels, rel_labels_frame)).pack(side="left", padx=2)
+            rel_lb_frame = tk.Frame(cont, bg="#1e2030")
+            rel_lb_frame.grid(row=row+1, column=1, columnspan=2, sticky="w", padx=0)
+            rel_lb_frame.grid_remove()
+            rel_listbox = tk.Listbox(rel_lb_frame, height=4, bg="#313244", fg="#cdd6f4", font=("Consolas", 8), selectbackground="#585b70")
+            rel_listbox.pack(side="left")
+            rel_listbox.bind("<<ListboxSelect>>", lambda e: self._on_popup_sel(e, rel_listbox, religion_var, rel_lb_frame))
+            rel_labels_frame = tk.Frame(cont, bg="#1e2030")
+            rel_labels_frame.grid(row=row+2, column=1, columnspan=2, sticky="w", pady=2)
+
+            # ============ LIGNE 8: Cultures ============
+            row += 3
+            tk.Label(cont, text="Cultures:", bg="#1e2030", fg="#cdd6f4", font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="nw", pady=6)
+            cult_frame = tk.Frame(cont, bg="#1e2030")
+            cult_frame.grid(row=row, column=1, columnspan=2, sticky="w", pady=6)
+            cult_entry = tk.Entry(cult_frame, textvariable=cultures_var, width=14, bg="#313244", fg="#cdd6f4", insertbackground="#cdd6f4", font=("Consolas", 9))
+            cult_entry.pack(side="left")
+            cult_entry.bind("<KeyRelease>", lambda e: self._filter_popup(e, self._cultures, cult_listbox, cultures_var, cult_lb_frame))
+            tk.Button(cult_frame, text="+", bg="#45475a", fg="#cdd6f4", width=3, command=lambda: self._add_to_list(cultures_var, culture_labels, cult_labels_frame)).pack(side="left", padx=2)
+            cult_lb_frame = tk.Frame(cont, bg="#1e2030")
+            cult_lb_frame.grid(row=row+1, column=1, columnspan=2, sticky="w", padx=0)
+            cult_lb_frame.grid_remove()
+            cult_listbox = tk.Listbox(cult_lb_frame, height=4, bg="#313244", fg="#cdd6f4", font=("Consolas", 8), selectbackground="#585b70")
+            cult_listbox.pack(side="left")
+            cult_listbox.bind("<<ListboxSelect>>", lambda e: self._on_popup_sel(e, cult_listbox, cultures_var, cult_lb_frame))
+            cult_labels_frame = tk.Frame(cont, bg="#1e2030")
+            cult_labels_frame.grid(row=row+2, column=1, columnspan=2, sticky="w", pady=2)
+
+            # Status label
+            status_lbl = tk.Label(popup, text="", bg="#1e2030", fg="#f38ba8", font=("Segoe UI", 8))
+            status_lbl.pack(pady=5)
+
+            def _create_country():
+                tag = tag_var.get().strip().upper()
+                name = name_var.get().strip()
+                capital = capital_var.get().strip()
+                color = color_var.get().strip()
+                ctype = country_type_var.get()
+                tier = tier_var.get()
+                religion = religion_labels[0] if religion_labels else (religion_var.get().strip() if religion_var.get().strip() else "")
+                cultures = culture_labels.copy()
+
+                if len(tag) < 2:
+                    status_lbl.config(text="TAG doit avoir au moins 2 caracteres")
+                    return
+                if not capital:
+                    status_lbl.config(text="Capital requise")
+                    return
+                if not cultures:
+                    status_lbl.config(text="Ajoute au moins une culture")
+                    return
+
+                mod = self.config.mod_path
+                if not mod:
+                    status_lbl.config(text="Configure le dossier mod d'abord (Config)")
+                    return
+
+                # Creer country definitions
+                def_dir = os.path.join(mod, "common", "country_definitions")
+                os.makedirs(def_dir, exist_ok=True)
+                def_file = os.path.join(def_dir, "99_hmm_countries.txt")
+
+                # Verifier si TAG existe deja
+                if os.path.exists(def_file):
+                    with open(def_file, "r", encoding="utf-8-sig") as f:
+                        if re.search(rf'^{re.escape(tag)}\s*=', f.read(), re.MULTILINE):
+                            status_lbl.config(text=f"TAG {tag} existe deja")
+                            return
+
+                # Construire le block pays
+                country_block = f"{tag} = {{\n"
+                country_block += f"    color = {{ {color} }}\n"
+                country_block += f"    country_type = {ctype}\n"
+                country_block += f"    tier = {tier}\n"
+                country_block += f"    cultures = {{ {' '.join(cultures)} }}\n"
+                country_block += f"    capital = {capital}\n"
+                if religion:
+                    country_block += f"    religion = {religion}\n"
+                country_block += f"}}\n"
+
+                # Ecrire au top du fichier
+                if os.path.exists(def_file):
+                    with open(def_file, "r", encoding="utf-8-sig") as f:
+                        old_content = f.read()
+                    new_content = country_block + old_content
+                else:
+                    new_content = country_block
+
+                with open(def_file, "w", encoding="utf-8-sig") as f:
+                    f.write(new_content)
+
+                # Localisation
+                if name:
+                    loc_dir = os.path.join(mod, "localization", "english")
+                    os.makedirs(loc_dir, exist_ok=True)
+                    loc_file = os.path.join(loc_dir, "00_hmm_countries_l_english.yml")
+
+                    loc_entry = f"{tag}:0 \"{name}\"\n{tag}_ADJ:0 \"{name}\"\n\n"
+
+                    if os.path.exists(loc_file):
+                        with open(loc_file, "r", encoding="utf-8-sig") as f:
+                            content = f.read()
+                        if content.startswith("l_english:"):
+                            content = content.split("\n", 1)[1]
+                        new_loc = "l_english:\n\n" + loc_entry + content
+                    else:
+                        new_loc = "l_english:\n\n" + loc_entry
+
+                    with open(loc_file, "w", encoding="utf-8-sig") as f:
+                        f.write(new_loc)
+
+                # Ajouter couleur au cache
+                color_parts = color.split()
+                if len(color_parts) == 3:
+                    self._country_colors[tag] = (int(color_parts[0]), int(color_parts[1]), int(color_parts[2]))
+
+                self._new_tag.set(tag)
+                self._display_map()
+                popup.destroy()
+                messagebox.showinfo("Succes", f"Pays {tag} cree avec succes !")
+
+            # Boutons
+            btn_frame = tk.Frame(popup, bg="#1e2030")
+            btn_frame.pack(pady=15)
+            tk.Button(btn_frame, text="Creer le pays", bg="#45475a", fg="#cdd6f4", font=("Segoe UI", 10, "bold"), width=14, height=1, command=_create_country).pack(side="left", padx=5)
+            tk.Button(btn_frame, text="Annuler", bg="#45475a", fg="#cdd6f4", font=("Segoe UI", 10), width=10, height=1, command=popup.destroy).pack(side="left", padx=5)
+
+    def _auto_gen_tag(self, tag_var):
+        mod = self.config.mod_path
+        if not mod:
+            messagebox.showerror("Erreur", "Configure le dossier mod d'abord")
+            return
+        def_dir = os.path.join(mod, "common", "country_definitions")
+        os.makedirs(def_dir, exist_ok=True)
+        tag = find_next_tag(def_dir)
+        tag_var.set(tag)
+
+    def _rand_color(self, color_var):
+        import random
+        r = random.randint(40, 220)
+        g = random.randint(40, 220)
+        b = random.randint(40, 220)
+        color_var.set(f"{r} {g} {b}")
+
+    def _filter_popup(self, event, data_list, listbox, var, frame):
+        value = var.get().lower()
+        listbox.delete(0, 'end')
+        if value:
+            matches = [c for c in data_list if c.lower().startswith(value)]
+            for m in matches[:15]:
+                listbox.insert('end', m)
+            if matches:
+                frame.grid()
+        else:
+            frame.grid_remove()
+
+    def _on_popup_sel(self, event, listbox, var, frame):
+        sel = listbox.curselection()
+        if sel:
+            var.set(listbox.get(sel[0]))
+            frame.grid_remove()
+
+    def _add_to_list(self, entry_var, labels_list, parent_frame):
+        value = entry_var.get().strip()
+        if not value:
+            return
+        if value not in labels_list:
+            labels_list.append(value)
+            entry_var.set("")
+            # Afficher le label
+            lbl = ttk.Label(parent_frame, text=value, font=("Consolas", 8))
+            lbl.pack(side="left", padx=2)

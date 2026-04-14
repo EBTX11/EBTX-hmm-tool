@@ -14,6 +14,7 @@ from modules.population_frame import PopulationFrame
 from modules.tech_frame import TechFrame
 from modules.province_frame import ProvinceFrame
 from modules.map_frame import MapFrame
+from modules.buildpop_frame import BuildPopFrame
 
 
 # ============================================================
@@ -212,14 +213,15 @@ class EBTXApp:
 
         self._nav_buttons = {}
         nav_items = [
-            ("Config",       "config"),
-            ("Carte",        "carte"),
-            ("Pays",         "pays"),
-            ("Personnages",  "perso"),
-            ("Devises",      "devises"),
-            ("Population",   "population"),
-            ("Technologie",  "tech"),
-            ("Provinces",    "provinces"),
+            ("Config",         "config"),
+            ("Carte",          "carte"),
+            ("Building/Pop",   "buildpop"),
+            ("Pays",           "pays"),
+            ("Personnages",    "perso"),
+            ("Devises",        "devises"),
+            ("Population",     "population"),
+            ("Technologie",    "tech"),
+            ("Provinces",      "provinces"),
         ]
         for label, key in nav_items:
             btn = ttk.Button(self.sidebar, text=label, style="Nav.TButton",
@@ -243,6 +245,7 @@ class EBTXApp:
             self.content, self.config, on_save=self._refresh_topbar
         )
         self._frames["carte"]      = MapFrame(self.content, self.config)
+        self._frames["buildpop"]   = BuildPopFrame(self.content, self.config)
         self._frames["pays"]       = PaysFrame(self.content, self.config)
         self._frames["perso"]      = CharacterFrame(self.content, self.config)
         self._frames["devises"]    = CurrencyFrame(self.content, self.config)
