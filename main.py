@@ -9,10 +9,6 @@ sys.path.insert(0, BASE_DIR)
 from modules.config_manager import ConfigManager
 from modules.pays_frame import PaysFrame
 from modules.character_frame import CharacterFrame
-from modules.currency_frame import CurrencyFrame
-from modules.population_frame import PopulationFrame
-from modules.tech_frame import TechFrame
-from modules.province_frame import ProvinceFrame
 from modules.map_frame import MapFrame
 from modules.buildpop_frame import BuildPopFrame
 
@@ -218,10 +214,6 @@ class EBTXApp:
             ("Building/Pop",   "buildpop"),
             ("Pays",           "pays"),
             ("Personnages",    "perso"),
-            ("Devises",        "devises"),
-            ("Population",     "population"),
-            ("Technologie",    "tech"),
-            ("Provinces",      "provinces"),
         ]
         for label, key in nav_items:
             btn = ttk.Button(self.sidebar, text=label, style="Nav.TButton",
@@ -241,17 +233,13 @@ class EBTXApp:
     def _build_frames(self):
         self._frames = {}
 
-        self._frames["config"]     = ConfigFrame(
+        self._frames["config"]   = ConfigFrame(
             self.content, self.config, on_save=self._refresh_topbar
         )
-        self._frames["carte"]      = MapFrame(self.content, self.config)
-        self._frames["buildpop"]   = BuildPopFrame(self.content, self.config)
-        self._frames["pays"]       = PaysFrame(self.content, self.config)
-        self._frames["perso"]      = CharacterFrame(self.content, self.config)
-        self._frames["devises"]    = CurrencyFrame(self.content, self.config)
-        self._frames["population"] = PopulationFrame(self.content, self.config)
-        self._frames["tech"]       = TechFrame(self.content, self.config)
-        self._frames["provinces"]  = ProvinceFrame(self.content, self.config)
+        self._frames["carte"]    = MapFrame(self.content, self.config)
+        self._frames["buildpop"] = BuildPopFrame(self.content, self.config)
+        self._frames["pays"]     = PaysFrame(self.content, self.config)
+        self._frames["perso"]    = CharacterFrame(self.content, self.config)
 
     # ----------------------------------------------------------
     # NAVIGATION

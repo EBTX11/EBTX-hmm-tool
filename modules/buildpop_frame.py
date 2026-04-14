@@ -25,6 +25,33 @@ from modules.map_frame import (
 
 SELECT_BOOST = 60
 
+# ─────────────────────────────────────────────────────────────
+# PARSEUR DEFINITIONS BATIMENTS
+# ─────────────────────────────────────────────────────────────
+
+def parse_buildings_definitions(buildings_dir):
+    """Parse tous les fichiers dans data/buildings/ et retourne la liste des batiments.
+    Retourne une liste triee de noms (sans le prefixe 'building_')."""
+    buildings = []
+    if not os.path.isdir(buildings_dir):
+        return buildings
+    for fname in sorted(os.listdir(buildings_dir)):
+        if not fname.endswith('.txt'):
+            continue
+        try:
+            with open(os.path.join(buildings_dir, fname), 'r', encoding='utf-8-sig') as f:
+                content = f.read()
+        except Exception:
+            continue
+        # Trouver toutes les definitions de batiments
+        for bm in re.finditer(r'^(\w+)\s*=\s*\{', content, re.MULTILINE):
+            name = bm.group(1)
+            if name.startswith('building_'):
+                short_name = name[len('building_'):]
+                if short_name not in buildings:
+                    buildings.append(short_name)
+    return sorted(buildings)
+
 
 # ─────────────────────────────────────────────────────────────
 # UTILITAIRES
@@ -202,10 +229,21 @@ class BuildPopFrame(ttk.Frame):
 
         self._selected_state    = None
         self._selected_tag      = None
-        self._tag_btns          = {}   # tag -> button widget
+        self._tag_btns          = {}   # tag -> button widget (NIVEAU ETAT)
+        self._pays_tag_btns     = {}   # tag -> button widget (NIVEAU PAYS miroir)
 
         self._edited_pops       = None  # [(culture, size)]
         self._edited_buildings  = None  # [(building, level)]
+
+        # Population générale (balance par TAG)
+        self._pg_current_total  = 0
+        self._pg_state_data     = []
+        self._pg_pop_files      = []
+        self._pg_edited_buildings = []   # [(building, level)] pour BATIMENTS PAYS
+
+        # Liste des batiments disponibles (pour les combobox)
+        self._available_buildings = []
+        self._load_buildings_list()
 
         self._build()
 
@@ -250,25 +288,18 @@ class BuildPopFrame(ttk.Frame):
         panel.pack_propagate(False)
         self._build_right_panel(panel)
 
+    @staticmethod
+    def _section_banner(parent, text, color):
+        """Bandeau titre de section avec liseré coloré."""
+        wrap = ttk.Frame(parent)
+        wrap.pack(fill="x", padx=4, pady=(10, 4))
+        tk.Frame(wrap, bg=color, height=2).pack(fill="x")
+        ttk.Label(wrap, text=text, font=("Segoe UI", 9, "bold"),
+                  foreground=color).pack(anchor="w", pady=(2, 0))
+        return wrap
+
     def _build_right_panel(self, parent):
-        # Etat selectionne
-        ttk.Label(parent, text="Etat :",
-                  font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=8, pady=(8, 0))
-        self._state_label = ttk.Label(parent, text="(cliquer sur un etat)",
-                                       font=("Consolas", 9), foreground="#cba6f7")
-        self._state_label.pack(anchor="w", padx=8)
-
-        # Selecteur TAG (split states)
-        ttk.Label(parent, text="Sous-etat (TAG) :",
-                  font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=8, pady=(6, 0))
-        self._tag_frame = ttk.Frame(parent)
-        self._tag_frame.pack(fill="x", padx=8, pady=(2, 4))
-        ttk.Label(self._tag_frame, text="—", foreground="#6c7086",
-                  font=("Segoe UI", 8)).pack(anchor="w")
-
-        ttk.Separator(parent, orient="horizontal").pack(fill="x", padx=4, pady=4)
-
-        # Zone scrollable (pops + buildings)
+        # ── Zone scrollable unique ────────────────────────────
         sc = ttk.Frame(parent)
         sc.pack(fill="both", expand=True)
         self._side_canvas = tk.Canvas(sc, bg="#1e1e2e", highlightthickness=0)
@@ -296,15 +327,140 @@ class BuildPopFrame(ttk.Frame):
 
         sf = self._scroll_frame
 
-        # ── POPS ─────────────────────────────────────────────
+        # ════════════════════════════════════════════════════
+        # BLOC PAYS  (fond légèrement différent pour distinguer)
+        # ════════════════════════════════════════════════════
+        pays_outer = tk.Frame(sf, bg="#252535", bd=0)
+        pays_outer.pack(fill="x", padx=4, pady=(6, 0))
+
+        self._section_banner(pays_outer, "◆  NIVEAU PAYS", "#f9e2af")
+
+        inner_pays = tk.Frame(pays_outer, bg="#252535")
+        inner_pays.pack(fill="x", padx=8, pady=(0, 8))
+
+        # ── Sélecteur Pays (TAG) — miroir des boutons état ──
+        row_tag_lbl = tk.Frame(inner_pays, bg="#252535")
+        row_tag_lbl.pack(fill="x", pady=(0, 2))
+        ttk.Label(row_tag_lbl, text="Pays (TAG) :",
+                  font=("Segoe UI", 8, "bold")).pack(side="left")
+
+        self._pays_tag_frame = tk.Frame(inner_pays, bg="#252535")
+        self._pays_tag_frame.pack(fill="x", pady=(0, 6))
+        ttk.Label(self._pays_tag_frame, text="—", foreground="#6c7086",
+                  font=("Segoe UI", 8)).pack(anchor="w")
+
+        tk.Frame(inner_pays, bg="#6c7086", height=1).pack(fill="x", pady=(0, 6))
+
+        # ── Population générale ───────────────────────────
+        ttk.Label(inner_pays, text="POPULATION GENERALE",
+                  font=("Segoe UI", 8, "bold"),
+                  foreground="#f9e2af").pack(anchor="w", pady=(0, 4))
+
+        row_pays = tk.Frame(inner_pays, bg="#252535")
+        row_pays.pack(fill="x", pady=2)
+        ttk.Label(row_pays, text="Pays :",
+                  font=("Segoe UI", 8), width=13, anchor="w").pack(side="left")
+        self._pg_tag_var = tk.StringVar()
+        ttk.Entry(row_pays, textvariable=self._pg_tag_var,
+                  width=8, font=("Consolas", 9)).pack(side="left", padx=(2, 4))
+        ttk.Button(row_pays, text="Analyser",
+                   command=self._pg_analyze).pack(side="left")
+
+        row_cur = tk.Frame(inner_pays, bg="#252535")
+        row_cur.pack(fill="x", pady=2)
+        ttk.Label(row_cur, text="Total actuel :",
+                  font=("Segoe UI", 8), width=13, anchor="w").pack(side="left")
+        self._pg_current_lbl = ttk.Label(row_cur, text="—",
+                                          font=("Consolas", 9), foreground="#cba6f7")
+        self._pg_current_lbl.pack(side="left")
+
+        row_tgt = tk.Frame(inner_pays, bg="#252535")
+        row_tgt.pack(fill="x", pady=2)
+        ttk.Label(row_tgt, text="Total souhaite :",
+                  font=("Segoe UI", 8), width=13, anchor="w").pack(side="left")
+        self._pg_target_var = tk.StringVar()
+        ttk.Entry(row_tgt, textvariable=self._pg_target_var,
+                  width=10, font=("Consolas", 9)).pack(side="left", padx=(2, 4))
+
+        row_apply = tk.Frame(inner_pays, bg="#252535")
+        row_apply.pack(fill="x", pady=(4, 0))
+        ttk.Button(row_apply, text="Appliquer",
+                   command=self._pg_apply,
+                   style="Accent.TButton").pack(side="left")
+        self._pg_status = ttk.Label(row_apply, text="",
+                                     foreground="#a6e3a1", font=("Segoe UI", 8))
+        self._pg_status.pack(side="left", padx=8)
+
+        tk.Frame(inner_pays, bg="#6c7086", height=1).pack(fill="x", pady=(8, 6))
+
+        # ── Bâtiments pays (futur outil pays) ────────────
+        ttk.Label(inner_pays, text="BATIMENTS PAYS",
+                  font=("Segoe UI", 8, "bold"),
+                  foreground="#f9e2af").pack(anchor="w", pady=(0, 4))
+
+        self._pg_bldg_frame = ttk.Frame(inner_pays)
+        self._pg_bldg_frame.pack(fill="x")
+        ttk.Label(self._pg_bldg_frame, text="(aucun batiment)",
+                  foreground="#6c7086", font=("Segoe UI", 8)).pack(anchor="w")
+
+        add_pgb = tk.Frame(inner_pays, bg="#252535")
+        add_pgb.pack(fill="x", pady=(4, 2))
+        ttk.Label(add_pgb, text="Batiment :", font=("Segoe UI", 8)).pack(side="left")
+        self._pg_new_bldg_var = tk.StringVar()
+        self._pg_new_bldg_combo = ttk.Combobox(
+            add_pgb, textvariable=self._pg_new_bldg_var,
+            values=self._available_buildings,
+            width=14, font=("Consolas", 8))
+        self._pg_new_bldg_combo.pack(side="left", padx=(2, 4))
+        ttk.Label(add_pgb, text="Niv :", font=("Segoe UI", 8)).pack(side="left")
+        self._pg_new_lvl_var = tk.StringVar(value="1")
+        ttk.Entry(add_pgb, textvariable=self._pg_new_lvl_var,
+                  width=4, font=("Consolas", 8)).pack(side="left", padx=(2, 4))
+        ttk.Button(add_pgb, text="+", width=3,
+                   command=self._pg_add_building).pack(side="left")
+
+        row_pgb_save = tk.Frame(inner_pays, bg="#252535")
+        row_pgb_save.pack(fill="x", pady=(4, 0))
+        self._pg_bldg_status = ttk.Label(row_pgb_save, text="",
+                                          foreground="#a6e3a1", font=("Segoe UI", 8))
+        self._pg_bldg_status.pack(side="left", expand=True, fill="x")
+        ttk.Button(row_pgb_save, text="Sauver Batiments Pays",
+                   command=self._pg_save_buildings,
+                   style="Accent.TButton").pack(side="right")
+
+        # ════════════════════════════════════════════════════
+        # BLOC ÉTAT  (fond principal)
+        # ════════════════════════════════════════════════════
+        self._section_banner(sf, "◆  NIVEAU ETAT", "#89b4fa")
+
+        # Etat sélectionné + TAG (dans le bloc état)
+        info_row = ttk.Frame(sf)
+        info_row.pack(fill="x", padx=8, pady=(0, 2))
+        ttk.Label(info_row, text="Etat :",
+                  font=("Segoe UI", 8, "bold")).pack(side="left")
+        self._state_label = ttk.Label(info_row, text="(cliquer sur la carte)",
+                                       font=("Consolas", 8), foreground="#89b4fa")
+        self._state_label.pack(side="left", padx=4)
+
+        ttk.Label(sf, text="Sous-etat (TAG) :",
+                  font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=8, pady=(4, 0))
+        self._tag_frame = ttk.Frame(sf)
+        self._tag_frame.pack(fill="x", padx=8, pady=(2, 6))
+        ttk.Label(self._tag_frame, text="—", foreground="#6c7086",
+                  font=("Segoe UI", 8)).pack(anchor="w")
+
+        tk.Frame(sf, bg="#45475a", height=1).pack(fill="x", padx=8, pady=4)
+
+        # ── Populations ───────────────────────────────────
         ttk.Label(sf, text="POPULATIONS",
                   font=("Segoe UI", 9, "bold"),
-                  foreground="#cba6f7").pack(anchor="w", padx=6, pady=(8, 2))
+                  foreground="#cba6f7").pack(anchor="w", padx=8, pady=(4, 2))
+
         self._pops_frame = ttk.Frame(sf)
-        self._pops_frame.pack(fill="x", padx=6)
+        self._pops_frame.pack(fill="x", padx=8)
 
         add_pf = ttk.Frame(sf)
-        add_pf.pack(fill="x", padx=6, pady=(4, 2))
+        add_pf.pack(fill="x", padx=8, pady=(4, 2))
         ttk.Label(add_pf, text="Culture :", font=("Segoe UI", 8)).pack(side="left")
         self._new_cult_var = tk.StringVar()
         ttk.Entry(add_pf, textvariable=self._new_cult_var,
@@ -315,44 +471,244 @@ class BuildPopFrame(ttk.Frame):
                   width=7, font=("Consolas", 8)).pack(side="left", padx=(2, 4))
         ttk.Button(add_pf, text="+", width=3, command=self._add_pop).pack(side="left")
 
-        ttk.Separator(sf, orient="horizontal").pack(fill="x", padx=4, pady=8)
+        row_sp = ttk.Frame(sf)
+        row_sp.pack(fill="x", padx=8, pady=(4, 2))
+        self._pops_status = ttk.Label(row_sp, text="", foreground="#a6e3a1",
+                                       font=("Segoe UI", 8), wraplength=170)
+        self._pops_status.pack(side="left", expand=True, fill="x")
+        ttk.Button(row_sp, text="Sauver Pops",
+                   command=self._save_pops,
+                   style="Accent.TButton").pack(side="right")
 
-        # ── BATIMENTS ────────────────────────────────────────
+        tk.Frame(sf, bg="#45475a", height=1).pack(fill="x", padx=8, pady=8)
+
+        # ── Bâtiments ─────────────────────────────────────
         ttk.Label(sf, text="BATIMENTS",
                   font=("Segoe UI", 9, "bold"),
-                  foreground="#cba6f7").pack(anchor="w", padx=6, pady=(0, 2))
+                  foreground="#cba6f7").pack(anchor="w", padx=8, pady=(0, 2))
+
         self._bldg_frame = ttk.Frame(sf)
-        self._bldg_frame.pack(fill="x", padx=6)
+        self._bldg_frame.pack(fill="x", padx=8)
 
         add_bf = ttk.Frame(sf)
-        add_bf.pack(fill="x", padx=6, pady=(4, 8))
+        add_bf.pack(fill="x", padx=8, pady=(4, 2))
         ttk.Label(add_bf, text="Batiment :", font=("Segoe UI", 8)).pack(side="left")
         self._new_bldg_var = tk.StringVar()
-        ttk.Entry(add_bf, textvariable=self._new_bldg_var,
-                  width=15, font=("Consolas", 8)).pack(side="left", padx=(2, 4))
+        self._new_building_combo = ttk.Combobox(
+            add_bf, textvariable=self._new_bldg_var,
+            values=self._available_buildings,
+            width=15, font=("Consolas", 8))
+        self._new_building_combo.pack(side="left", padx=(2, 4))
         ttk.Label(add_bf, text="Niv :", font=("Segoe UI", 8)).pack(side="left")
         self._new_lvl_var = tk.StringVar(value="1")
         ttk.Entry(add_bf, textvariable=self._new_lvl_var,
                   width=4, font=("Consolas", 8)).pack(side="left", padx=(2, 4))
         ttk.Button(add_bf, text="+", width=3, command=self._add_building).pack(side="left")
 
-        # ── SAVE ─────────────────────────────────────────────
-        ttk.Separator(parent, orient="horizontal").pack(fill="x", padx=4)
-        self._save_status = ttk.Label(parent, text="",
-                                       foreground="#a6e3a1",
-                                       font=("Segoe UI", 8), wraplength=300)
-        self._save_status.pack(anchor="w", padx=8, pady=(4, 0))
-        btn_row = ttk.Frame(parent)
-        btn_row.pack(fill="x", padx=8, pady=6)
-        ttk.Button(btn_row, text="Sauver Pops",
-                   command=self._save_pops,
-                   style="Accent.TButton").pack(side="left", expand=True, fill="x", padx=(0, 3))
-        ttk.Button(btn_row, text="Sauver Batiments",
+        row_sb = ttk.Frame(sf)
+        row_sb.pack(fill="x", padx=8, pady=(4, 10))
+        self._bldg_status = ttk.Label(row_sb, text="", foreground="#a6e3a1",
+                                       font=("Segoe UI", 8), wraplength=170)
+        self._bldg_status.pack(side="left", expand=True, fill="x")
+        ttk.Button(row_sb, text="Sauver Batiments",
                    command=self._save_buildings,
-                   style="Accent.TButton").pack(side="left", expand=True, fill="x")
+                   style="Accent.TButton").pack(side="right")
 
     def _side_scroll(self, event):
         self._side_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    # ── CHARGEMENT LISTE BATIMENTS ────────────────────────────
+
+    def _load_buildings_list(self):
+        """Charge la liste des batiments disponibles depuis data/buildings/."""
+        # Chercher le dossier data/buildings/ a partir du repertoire du script
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        buildings_dir = os.path.join(base_dir, "data", "buildings")
+        self._available_buildings = parse_buildings_definitions(buildings_dir)
+
+    # ── POPULATION GENERALE ───────────────────────────────────
+
+    def _pg_load_files(self):
+        mod = self.config.mod_path
+        if not mod:
+            return False
+        pops_path = os.path.join(mod, "common", "history", "pops")
+        if not os.path.isdir(pops_path):
+            self._pg_status.config(text=f"Dossier pops introuvable")
+            return False
+        self._pg_pop_files = []
+        for root, _, files in os.walk(pops_path):
+            for fname in files:
+                if fname.endswith(".txt"):
+                    self._pg_pop_files.append(os.path.join(root, fname))
+        return True
+
+    def _pg_get_total(self, tag):
+        """Calcule le total de pops pour region_state:TAG dans tous les fichiers."""
+        import re as _re
+        total = 0
+        state_data = []
+        for fpath in self._pg_pop_files:
+            try:
+                with open(fpath, "r", encoding="utf-8-sig") as fh:
+                    content = fh.read()
+            except Exception:
+                continue
+            # Trouver tous les blocs region_state:TAG = { }
+            for rs in _re.finditer(rf'region_state:{_re.escape(tag)}\s*=\s*\{{', content):
+                depth, i = 1, rs.end()
+                while i < len(content) and depth > 0:
+                    if content[i] == '{': depth += 1
+                    elif content[i] == '}': depth -= 1
+                    i += 1
+                rs_block = content[rs.start():i]
+                pops = []
+                st = 0
+                for pm in _re.finditer(r'create_pop\s*=\s*\{', rs_block):
+                    pe_start = pm.end()
+                    d2, j = 1, pe_start
+                    while j < len(rs_block) and d2 > 0:
+                        if rs_block[j] == '{': d2 += 1
+                        elif rs_block[j] == '}': d2 -= 1
+                        j += 1
+                    pop_block = rs_block[pm.start():j]
+                    sm = _re.search(r'size\s*=\s*(\d+)', pop_block)
+                    if sm:
+                        s = int(sm.group(1))
+                        st += s
+                        pops.append((pop_block, s))
+                if st > 0:
+                    total += st
+                    state_data.append((fpath, pops, st))
+        return total, state_data
+
+    def _pg_analyze(self):
+        tag = self._pg_tag_var.get().strip().upper()
+        if not tag:
+            self._pg_status.config(text="Entre un TAG")
+            return
+        if not self._pg_load_files():
+            self._pg_status.config(text="Mod non configure")
+            return
+        total, data = self._pg_get_total(tag)
+        if total == 0:
+            self._pg_current_lbl.config(text="—")
+            self._pg_status.config(text=f"Aucune pop pour {tag}")
+            return
+        self._pg_current_total = total
+        self._pg_state_data    = data
+        self._pg_current_lbl.config(text=f"{total:,}")
+        self._pg_status.config(text=f"{len(data)} region(s) trouvees")
+
+    def _pg_apply(self):
+        if not self._pg_current_total:
+            self._pg_status.config(text="Analyser d'abord")
+            return
+        try:
+            target = int(self._pg_target_var.get().replace(" ", "").replace(",", ""))
+        except ValueError:
+            self._pg_status.config(text="Cible invalide")
+            return
+        ratio = target / self._pg_current_total
+        import re as _re
+        file_contents = {}
+        for fpath in self._pg_pop_files:
+            try:
+                with open(fpath, "r", encoding="utf-8-sig") as fh:
+                    file_contents[fpath] = fh.read()
+            except Exception:
+                pass
+        for fpath, pops, _ in self._pg_state_data:
+            if fpath not in file_contents:
+                continue
+            content = file_contents[fpath]
+            for block, size in pops:
+                new_size = max(1, int(size * ratio))
+                new_block = _re.sub(r'size\s*=\s*\d+', f'size = {new_size}', block)
+                content = content.replace(block, new_block, 1)
+            file_contents[fpath] = content
+        for fpath, content in file_contents.items():
+            with open(fpath, "w", encoding="utf-8-sig") as fh:
+                fh.write(content)
+        self._pg_current_lbl.config(text=f"{target:,}")
+        self._pg_current_total = target
+        self._pg_status.config(text=f"OK — ratio {ratio:.3f}")
+
+    # ── BATIMENTS PAYS (NIVEAU PAYS) ──────────────────────────
+
+    def _pg_refresh_bldg_list(self):
+        for w in self._pg_bldg_frame.winfo_children():
+            w.destroy()
+        if not self._pg_edited_buildings:
+            ttk.Label(self._pg_bldg_frame, text="(aucun batiment)",
+                      foreground="#6c7086", font=("Segoe UI", 8)).pack(anchor="w")
+            return
+        for i, (building, level) in enumerate(self._pg_edited_buildings):
+            row = ttk.Frame(self._pg_bldg_frame)
+            row.pack(fill="x", pady=1)
+            display = building[len("building_"):] if building.startswith("building_") else building
+            b_var = tk.StringVar(value=display)
+            l_var = tk.StringVar(value=str(level))
+            ttk.Entry(row, textvariable=b_var, width=18,
+                      font=("Consolas", 8)).pack(side="left", padx=(0, 2))
+            ttk.Entry(row, textvariable=l_var, width=4,
+                      font=("Consolas", 8)).pack(side="left", padx=(0, 2))
+            row._bv = b_var
+            row._lv = l_var
+            ttk.Button(row, text="✕", width=2,
+                       command=lambda idx=i: self._pg_remove_building(idx)).pack(side="left")
+
+    def _pg_collect_buildings(self):
+        result = []
+        for row in self._pg_bldg_frame.winfo_children():
+            if hasattr(row, '_bv'):
+                b = row._bv.get().strip()
+                l = row._lv.get().strip()
+                if b:
+                    full = b if b.startswith("building_") else f"building_{b}"
+                    try:
+                        result.append((full, int(l)))
+                    except ValueError:
+                        result.append((full, 1))
+        return result
+
+    def _pg_add_building(self):
+        self._pg_edited_buildings = self._pg_collect_buildings()
+        b = self._pg_new_bldg_var.get().strip()
+        if not b:
+            return
+        try:
+            level = int(self._pg_new_lvl_var.get())
+        except ValueError:
+            level = 1
+        full = b if b.startswith("building_") else f"building_{b}"
+        self._pg_edited_buildings.append((full, level))
+        self._pg_new_bldg_var.set("")
+        self._pg_new_lvl_var.set("1")
+        self._pg_refresh_bldg_list()
+
+    def _pg_remove_building(self, idx):
+        self._pg_edited_buildings = self._pg_collect_buildings()
+        if 0 <= idx < len(self._pg_edited_buildings):
+            self._pg_edited_buildings.pop(idx)
+        self._pg_refresh_bldg_list()
+
+    def _pg_save_buildings(self):
+        """Sauvegarde les batiments au niveau pays (futur outil — placeholder)."""
+        buildings = self._pg_collect_buildings()
+        if not buildings:
+            self._pg_bldg_status.config(text="Aucun batiment a sauver")
+            return
+        tag = self._pg_tag_var.get().strip().upper()
+        if not tag:
+            self._pg_bldg_status.config(text="Entre un TAG pays d'abord")
+            return
+        # Outil pays a implementer — affiche un resume pour l'instant
+        summary = ", ".join(
+            f"{b[len('building_'):] if b.startswith('building_') else b}×{l}"
+            for b, l in buildings
+        )
+        self._pg_bldg_status.config(text=f"[{tag}] {len(buildings)} batiment(s): {summary}")
 
     # ── SELECTEUR TAG ─────────────────────────────────────────
 
@@ -361,11 +717,16 @@ class BuildPopFrame(ttk.Frame):
         prefer_tag : si fourni et present, sera selectionne en priorite."""
         for w in self._tag_frame.winfo_children():
             w.destroy()
+        for w in self._pays_tag_frame.winfo_children():
+            w.destroy()
         self._tag_btns = {}
+        self._pays_tag_btns = {}
 
         tags = sorted({tag for (s, tag) in self._substates if s == state})
         if not tags:
             ttk.Label(self._tag_frame, text="(aucun owner dans 00_states.txt)",
+                      foreground="#f38ba8", font=("Segoe UI", 8)).pack(anchor="w")
+            ttk.Label(self._pays_tag_frame, text="(aucun owner)",
                       foreground="#f38ba8", font=("Segoe UI", 8)).pack(anchor="w")
             return
 
@@ -374,6 +735,11 @@ class BuildPopFrame(ttk.Frame):
                              command=lambda t=tag: self._select_tag(t))
             btn.pack(side="left", padx=(0, 3))
             self._tag_btns[tag] = btn
+
+            btn2 = ttk.Button(self._pays_tag_frame, text=tag,
+                              command=lambda t=tag: self._select_tag(t))
+            btn2.pack(side="left", padx=(0, 3))
+            self._pays_tag_btns[tag] = btn2
 
         # Selectionner le TAG clique si present, sinon le premier
         initial = prefer_tag if prefer_tag in self._tag_btns else tags[0]
@@ -386,9 +752,14 @@ class BuildPopFrame(ttk.Frame):
 
         self._selected_tag = tag
 
-        # Mettre en evidence le bouton actif
+        # Mettre en evidence le bouton actif (NIVEAU ETAT et NIVEAU PAYS)
         for t, btn in self._tag_btns.items():
             btn.configure(style="Accent.TButton" if t == tag else "TButton")
+        for t, btn in getattr(self, '_pays_tag_btns', {}).items():
+            btn.configure(style="Accent.TButton" if t == tag else "TButton")
+
+        # Auto-fill du TAG dans "Population générale"
+        self._pg_tag_var.set(tag)
 
         # Charger les donnees de ce TAG
         state = self._selected_state
@@ -399,7 +770,8 @@ class BuildPopFrame(ttk.Frame):
 
         self._refresh_pops_list()
         self._refresh_bldg_list()
-        self._save_status.config(text="")
+        self._pops_status.config(text="")
+        self._bldg_status.config(text="")
         self._display_map()
 
     def _flush_edits_to_data(self, state, tag):
@@ -819,7 +1191,6 @@ class BuildPopFrame(ttk.Frame):
                 lines.append(f"{T}{T}{T}{T}{T}levels = {level}")
                 lines.append(f"{T}{T}{T}{T}}}")
                 lines.append(f"{T}{T}{T}}}")
-                lines.append(f"{T}{T}{T}reserves = 1")
                 lines.append(f"{T}{T}}}")
             lines.append(f"{T}}}")
         lines.append("}")
@@ -844,7 +1215,7 @@ class BuildPopFrame(ttk.Frame):
         tag   = self._selected_tag
         pops  = self._collect_pops()
         if not pops:
-            self._save_status.config(text="Aucune pop a sauvegarder")
+            self._pops_status.config(text="Aucune pop")
             return
         pops_dir = os.path.join(self.config.mod_path, "common/history/pops")
         if not os.path.isdir(pops_dir):
@@ -855,8 +1226,7 @@ class BuildPopFrame(ttk.Frame):
             if state not in self._pops_data:
                 self._pops_data[state] = {}
             self._pops_data[state][tag] = pops
-            self._save_status.config(
-                text=f"Pops OK [{tag}] -> {os.path.basename(info)}")
+            self._pops_status.config(text=f"OK [{tag}] {os.path.basename(info)}")
 
     def _save_buildings(self):
         if not self._check_ready():
@@ -865,7 +1235,7 @@ class BuildPopFrame(ttk.Frame):
         tag       = self._selected_tag
         buildings = self._collect_buildings()
         if not buildings:
-            self._save_status.config(text="Aucun batiment a sauvegarder")
+            self._bldg_status.config(text="Aucun batiment")
             return
         bldgs_dir = os.path.join(self.config.mod_path, "common/history/buildings")
         if not os.path.isdir(bldgs_dir):
@@ -876,5 +1246,4 @@ class BuildPopFrame(ttk.Frame):
             if state not in self._buildings_data:
                 self._buildings_data[state] = {}
             self._buildings_data[state][tag] = buildings
-            self._save_status.config(
-                text=f"Batiments OK [{tag}] -> {os.path.basename(info)}")
+            self._bldg_status.config(text=f"OK [{tag}] {os.path.basename(info)}")

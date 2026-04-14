@@ -4,6 +4,8 @@ import os
 import re
 import random
 
+from modules.tech_frame import TechFrame
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
 
@@ -51,6 +53,7 @@ class PaysFrame(ttk.Frame):
         self._tab_modifier(nb)
         self._tab_dyn_name(nb)
         self._tab_historique(nb)
+        self._tab_tech(nb)
 
     # ----------------------------------------------------------
     # TAB 1 : CREER UN PAYS
@@ -476,3 +479,11 @@ class PaysFrame(ttk.Frame):
         self._hist_status.config(text=f"Cree: {os.path.basename(file_path)}")
         messagebox.showinfo("Succes", f"Fichier historique cree !")
         self._hist_tag.set("")
+
+    # ----------------------------------------------------------
+    # TAB 5 : TECHNOLOGIE
+    # ----------------------------------------------------------
+
+    def _tab_tech(self, nb):
+        f = TechFrame(nb, self.config)
+        nb.add(f, text="  Technologie  ")
