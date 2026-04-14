@@ -51,6 +51,7 @@ class PaysFrame(ttk.Frame):
         self._tab_generale(nb)
         self._tab_lois(nb)
         self._tab_tech(nb)
+        self._tab_techno_generale(nb)
     # ---------------- SIDEBAR ----------------
 
     def _build_country_sidebar(self, parent):
@@ -146,4 +147,133 @@ class PaysFrame(ttk.Frame):
     def _tab_tech(self, nb):
         f = TechFrame(nb, self.config)
         nb.add(f, text="Technologie")
+
+    def _tab_techno_generale(self, nb):
+        f = ttk.Frame(nb)
+        nb.add(f, text="Technologie générale")
+
+        btn_frame = ttk.Frame(f)
+        btn_frame.pack(fill="x", padx=10, pady=5)
+        ttk.Button(btn_frame, text="Charger 00_major_tags.txt", command=self._load_major_tags).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Sauvegarder", command=self._save_major_tags).pack(side="left", padx=5)
+        self._major_tags_status = ttk.Label(btn_frame, text="")
+        self._major_tags_status.pack(side="left", padx=10)
+
+        base_frame = ttk.LabelFrame(f, text="Défaut (BASE:)")
+        base_frame.pack(fill="x", padx=10, pady=(5, 0))
+        self._base_var = tk.StringVar()
+        ttk.Entry(base_frame, textvariable=self._base_var, width=70).pack(padx=5, pady=5, fill="x")
+
+        outer = ttk.Frame(f)
+        outer.pack(fill="both", expand=True, padx=10, pady=5)
+
+        self._major_canvas = tk.Canvas(outer)
+        scrollbar_y = ttk.Scrollbar(outer, orient="vertical", command=self._major_canvas.yview)
+
+        self._sections_frame = ttk.Frame(self._major_canvas)
+        self._sections_frame.bind(
+            "<Configure>",
+            lambda e: self._major_canvas.configure(scrollregion=self._major_canvas.bbox("all"))
+        )
+
+        self._major_canvas_window = self._major_canvas.create_window((0, 0), window=self._sections_frame, anchor="nw")
+        self._major_canvas.configure(yscrollcommand=scrollbar_y.set)
+        self._major_canvas.bind("<Configure>", lambda e: self._major_canvas.itemconfig(self._major_canvas_window, width=e.width))
+
+        scrollbar_y.pack(side="right", fill="y")
+        self._major_canvas.pack(side="left", fill="both", expand=True)
+
+        self._section_data = []
+        self._major_tags_filepath = None
+
+    def _load_major_tags(self):
+        mod = self.config.mod_path
+        if not mod:
+            messagebox.showerror("Erreur", "Configure le dossier mod d'abord")
+            return
+
+        filepath = os.path.join(mod, "common", "history", "countries", "00_major_tags.txt")
+        if not os.path.exists(filepath):
+            messagebox.showerror("Erreur", f"Fichier introuvable:\n{filepath}")
+            return
+
+        for widget in self._sections_frame.winfo_children():
+            widget.destroy()
+        self._section_data = []
+
+        sections = []
+        current_header = None
+        current_tags = []
+        base_line = ""
+
+        with open(filepath, "r", encoding="utf-8") as fh:
+            for line in fh:
+                raw = line.strip()
+                if not raw:
+                    continue
+                if raw.upper().startswith("BASE:"):
+                    base_line = raw.split("BASE:", 1)[1].strip()
+                    continue
+                if raw.startswith("#"):
+                    if current_header is not None:
+                        sections.append((current_header, list(current_tags)))
+                    current_header = raw
+                    current_tags = []
+                    continue
+                current_tags.append(raw)
+
+        if current_header is not None:
+            sections.append((current_header, list(current_tags)))
+
+        self._base_var.set(base_line)
+        self._major_tags_filepath = filepath
+
+        def header_to_effect(header):
+            upper = header.upper()
+            tier_match = re.search(r'TIER_(\d)', upper)
+            tier = tier_match.group(1) if tier_match else "?"
+            if "_TECH_HMM" in upper:
+                return f"effect_starting_technology_tier_{tier}_tech_hmm = yes"
+            elif "_TECH" in upper:
+                return f"effect_starting_technology_tier_{tier}_tech = yes"
+            return header.lstrip("# ")
+
+        for header, tags in sections:
+            effect = header_to_effect(header)
+            lf = ttk.LabelFrame(self._sections_frame, text=effect)
+            lf.pack(fill="x", padx=5, pady=3)
+
+            txt = tk.Text(lf, height=4, font=("Consolas", 9), wrap="word")
+            txt.pack(fill="both", expand=True, padx=5, pady=3)
+            txt.insert("1.0", "\n".join(tags))
+
+            self._section_data.append((header, effect, txt))
+
+        self._major_tags_status.config(text=f"{len(sections)} sections chargées")
+
+    def _save_major_tags(self):
+        if not self._major_tags_filepath or not self._section_data:
+            messagebox.showerror("Erreur", "Chargez d'abord le fichier")
+            return
+
+        lines = []
+        base = self._base_var.get().strip()
+        if base:
+            lines.append(f"BASE: {base}")
+            lines.append("")
+
+        for header, effect, txt in self._section_data:
+            lines.append(header)
+            content = txt.get("1.0", "end").strip()
+            for tag in content.split("\n"):
+                tag = tag.strip()
+                if tag:
+                    lines.append(tag)
+            lines.append("")
+
+        with open(self._major_tags_filepath, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines))
+
+        self._major_tags_status.config(text="Sauvegardé !")
+        messagebox.showinfo("OK", "00_major_tags.txt sauvegardé")
 
