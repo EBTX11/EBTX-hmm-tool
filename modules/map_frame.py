@@ -36,15 +36,18 @@ def parse_state_regions(sr_dir):
     Retourne:
       prov_to_state : {province_hex: STATE_NAME}
       state_to_provs: {STATE_NAME: set(province_hex)}
+      sea_states    : set(STATE_NAME) — etats oceaniques (99_seas.txt)
     """
     prov_to_state  = {}
     state_to_provs = {}
+    sea_states     = set()
     prov_pat  = re.compile(r'"(x[0-9A-Fa-f]{6})"')
     state_pat = re.compile(r'^(STATE_\w+)\s*=\s*\{', re.MULTILINE)
 
     for fname in sorted(os.listdir(sr_dir)):
         if not fname.endswith(".txt"):
             continue
+        is_sea_file = "seas" in fname.lower() or "ocean" in fname.lower()
         with open(os.path.join(sr_dir, fname), "r", encoding="utf-8-sig") as fh:
             content = fh.read()
 
@@ -64,8 +67,10 @@ def parse_state_regions(sr_dir):
                 provs.add(p)
                 prov_to_state[p] = state
             state_to_provs[state] = provs
+            if is_sea_file:
+                sea_states.add(state)
 
-    return prov_to_state, state_to_provs
+    return prov_to_state, state_to_provs, sea_states
 
 
 def parse_states_file(states_path):
@@ -169,13 +174,14 @@ def _random_country_color(tag):
     return (80 + h[0] % 150, 80 + h[1] % 150, 80 + h[2] % 150)
 
 
-def build_render(provinces_arr, prov_to_state, prov_owner_map, country_colors):
+def build_render(provinces_arr, prov_to_state, prov_owner_map, country_colors, sea_states=None):
     """
     Construit le rendu (H, W, 3).
     - Couleur par province selon son TAG proprietaire
-    - Bordure rouge entre sous-etats (state, tag) differents
+    - Bordure rouge entre etats differents (pas entre splits du meme etat, pas en mer)
     """
     H, W = provinces_arr.shape[:2]
+    sea_states = sea_states or set()
 
     r = provinces_arr[:, :, 0].astype(np.uint32)
     g = provinces_arr[:, :, 1].astype(np.uint32)
@@ -183,19 +189,12 @@ def build_render(provinces_arr, prov_to_state, prov_owner_map, country_colors):
     prov_ints = (r << 16) | (g << 8) | b   # (H, W)
 
     # --- Tables de lookup ---
-    color_table    = np.full((16_777_216, 3), fill_value=list(OCEAN_COLOR), dtype=np.uint8)
-    substate_table = np.zeros(16_777_216, dtype=np.uint32)   # 0 = ocean
-
-    # Construire ID numerique par sous-etat (state_name, tag)
-    # Cle = toutes les combinaisons presentes dans les deux dicts
-    all_substates = set()
-    for prov_hex, state_name in prov_to_state.items():
-        tag = prov_owner_map.get(prov_hex)
-        all_substates.add((state_name, tag))   # tag peut etre None
-
-    substate_ids = {ss: idx + 1 for idx, ss in enumerate(sorted(
-        all_substates, key=lambda x: (x[0], x[1] or "")
-    ))}
+    color_table  = np.full((16_777_216, 3), fill_value=list(OCEAN_COLOR), dtype=np.uint8)
+    # IDs par STATE_NAME uniquement (pas par tag) → bordures entre etats, pas entre splits
+    # Les etats de mer et l'ocean restent a 0
+    state_names = sorted(s for s in set(prov_to_state.values()) if s not in sea_states)
+    state_ids   = {s: idx + 1 for idx, s in enumerate(state_names)}
+    border_table = np.zeros(16_777_216, dtype=np.uint32)
 
     fallback_cache = {}
 
@@ -217,21 +216,23 @@ def build_render(provinces_arr, prov_to_state, prov_owner_map, country_colors):
         else:
             color = UNKNOWN_COLOR
 
-        color_table[prov_int]    = color
-        substate_table[prov_int] = substate_ids.get((state_name, tag), 0)
+        color_table[prov_int] = color
+        # ID border = 0 pour les etats oceaniques (pas de bordure en mer)
+        if state_name not in sea_states:
+            border_table[prov_int] = state_ids.get(state_name, 0)
 
     # Appliquer
-    rendered     = color_table[prov_ints]       # (H, W, 3)
-    substate_map = substate_table[prov_ints]    # (H, W) — ID sous-etat par pixel
+    rendered   = color_table[prov_ints]        # (H, W, 3)
+    border_map = border_table[prov_ints]       # (H, W) — ID etat par pixel (0 = ocean/mer)
 
-    # --- Bordures entre sous-etats differents ---
-    land    = substate_map > 0
-    h_diff  = substate_map[:, :-1] != substate_map[:, 1:]
-    v_diff  = substate_map[:-1, :] != substate_map[1:, :]
-    h_land  = land[:, :-1] & land[:, 1:]
-    v_land  = land[:-1, :] & land[1:, :]
+    # --- Bordures entre etats terrestres differents ---
+    land   = border_map > 0
+    h_diff = border_map[:, :-1] != border_map[:, 1:]
+    v_diff = border_map[:-1, :] != border_map[1:, :]
+    h_land = land[:, :-1] & land[:, 1:]
+    v_land = land[:-1, :] & land[1:, :]
 
-    border  = np.zeros((H, W), dtype=bool)
+    border = np.zeros((H, W), dtype=bool)
     border[:, :-1] |= h_diff & h_land
     border[:, 1:]  |= h_diff & h_land
     border[:-1, :] |= v_diff & v_land
@@ -315,6 +316,7 @@ class MapFrame(ttk.Frame):
         self._prov_owner_map = {}     # {prov_hex: TAG}  ← par province
         self._substates      = {}     # {(state, tag): set(prov_hex)}
         self._country_colors = {}
+        self._sea_states     = set()
 
         # UI
         self._zoom     = INITIAL_ZOOM
@@ -419,9 +421,10 @@ class MapFrame(ttk.Frame):
             mod = self.config.mod_path
 
             self._after("Parsing state_regions...")
-            prov_to_state, state_to_provs = parse_state_regions(SR_DIR)
+            prov_to_state, state_to_provs, sea_states = parse_state_regions(SR_DIR)
             self._prov_to_state  = prov_to_state
             self._state_to_provs = state_to_provs
+            self._sea_states     = sea_states
 
             self._after("Lecture 00_states.txt (split states inclus)...")
             states_path = os.path.join(mod, "common/history/states/00_states.txt") if mod else ""
@@ -451,7 +454,7 @@ class MapFrame(ttk.Frame):
 
             self._after("Rendu numpy (couleurs + bordures)...")
             rendered, prov_ints = build_render(
-                self._prov_arr, prov_to_state, prov_owner_map, country_colors
+                self._prov_arr, prov_to_state, prov_owner_map, country_colors, sea_states
             )
             self._rendered  = rendered
             self._prov_ints = prov_ints
@@ -639,7 +642,7 @@ class MapFrame(ttk.Frame):
         # Re-rendre avec les nouvelles couleurs
         rendered, _ = build_render(
             self._prov_arr, self._prov_to_state,
-            self._prov_owner_map, self._country_colors
+            self._prov_owner_map, self._country_colors, self._sea_states
         )
         self._rendered = rendered
 
