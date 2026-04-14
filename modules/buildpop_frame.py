@@ -356,8 +356,9 @@ class BuildPopFrame(ttk.Frame):
 
     # ── SELECTEUR TAG ─────────────────────────────────────────
 
-    def _rebuild_tag_selector(self, state):
-        """Reconstruit les boutons TAG selon les owners de l'etat."""
+    def _rebuild_tag_selector(self, state, prefer_tag=None):
+        """Reconstruit les boutons TAG selon les owners de l'etat.
+        prefer_tag : si fourni et present, sera selectionne en priorite."""
         for w in self._tag_frame.winfo_children():
             w.destroy()
         self._tag_btns = {}
@@ -374,12 +375,13 @@ class BuildPopFrame(ttk.Frame):
             btn.pack(side="left", padx=(0, 3))
             self._tag_btns[tag] = btn
 
-        # Auto-selectionner le premier TAG
-        self._select_tag(tags[0])
+        # Selectionner le TAG clique si present, sinon le premier
+        initial = prefer_tag if prefer_tag in self._tag_btns else tags[0]
+        self._select_tag(initial)
 
     def _select_tag(self, tag):
-        # Sauvegarder les edits en cours avant de changer de TAG
-        if self._selected_tag and self._edited_pops is not None:
+        # Flush les edits en cours uniquement si on change de TAG (pas la premiere selection)
+        if self._selected_tag and self._selected_tag != tag and self._edited_pops is not None:
             self._flush_edits_to_data(self._selected_state, self._selected_tag)
 
         self._selected_tag = tag
@@ -398,6 +400,7 @@ class BuildPopFrame(ttk.Frame):
         self._refresh_pops_list()
         self._refresh_bldg_list()
         self._save_status.config(text="")
+        self._display_map()
 
     def _flush_edits_to_data(self, state, tag):
         """Persiste les valeurs UI dans _pops_data/_buildings_data avant changement de TAG."""
@@ -685,22 +688,21 @@ class BuildPopFrame(ttk.Frame):
         if not state or state in self._sea_states:
             return
 
-        # Detecter le TAG owner de la province cliquee
         clicked_tag = self._prov_owner_map.get(prov_hex)
 
         if state != self._selected_state:
-            # Nouveau state : reconstruire le selecteur TAG
+            # Flush les edits AVANT de changer de state (evite flush vers mauvais state)
+            if self._selected_state and self._selected_tag and self._edited_pops is not None:
+                self._flush_edits_to_data(self._selected_state, self._selected_tag)
+
             self._selected_state = state
+            self._selected_tag   = None   # reset pour eviter un double-flush dans _select_tag
             self._state_label.config(text=state)
-            self._rebuild_tag_selector(state)
-            # Si on connait le TAG clique, le selectionner directement
-            if clicked_tag and clicked_tag in self._tag_btns:
-                self._select_tag(clicked_tag)
+            self._rebuild_tag_selector(state, prefer_tag=clicked_tag)
         else:
             # Meme state : juste changer de TAG si besoin
-            if clicked_tag and clicked_tag in self._tag_btns:
-                if clicked_tag != self._selected_tag:
-                    self._select_tag(clicked_tag)
+            if clicked_tag and clicked_tag in self._tag_btns and clicked_tag != self._selected_tag:
+                self._select_tag(clicked_tag)
 
     def _zoom_in(self):
         self._zoom = min(self._zoom * ZOOM_STEP, 2.0)
