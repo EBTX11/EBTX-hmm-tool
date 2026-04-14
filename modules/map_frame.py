@@ -633,13 +633,19 @@ class MapFrame(ttk.Frame):
                 state_name = sm.group(1)
                 start_of_state = i + sm.start()
                 block_start = i + sm.end()
+
+                # Détecter l'indentation du bloc s:STATE (ex: "    " si dans STATES = { })
+                before = content[i:start_of_state]
+                last_nl = before.rfind('\n')
+                indent = before[last_nl + 1:] if last_nl >= 0 else ''
+
                 depth, j = 1, block_start
                 while j < len(content) and depth > 0:
                     if content[j] == "{": depth += 1
                     elif content[j] == "}": depth -= 1
                     j += 1
                 state_block = content[block_start:j - 1]
-                new_state = self._build_state_block(state_name, state_block)
+                new_state = self._build_state_block(state_name, state_block, indent)
                 new_content.append(content[i:start_of_state])
                 new_content.append(new_state)
                 i = j
@@ -649,8 +655,8 @@ class MapFrame(ttk.Frame):
         with open(states_path, "w", encoding="utf-8-sig") as fh:
             fh.write("".join(new_content))
 
-    def _build_state_block(self, state_name, original_block):
-        # Retirer les create_state existants, garder le reste (add_claim, etc.)
+    def _build_state_block(self, state_name, original_block, indent=""):
+        # Retirer les create_state existants, garder le reste (add_claim, add_homeland, etc.)
         rest_of_block = original_block
         for cs_match in reversed(list(re.finditer(r'create_state\s*=\s*\{', original_block))):
             cs_end = cs_match.end()
@@ -662,6 +668,7 @@ class MapFrame(ttk.Frame):
             rest_of_block = rest_of_block[:cs_match.start()] + rest_of_block[j:]
         other_content = rest_of_block.strip()
 
+        # Pas d'indent sur la première ligne : content[i:start_of_state] le fournit déjà
         lines = [f"s:{state_name} = {{"]
 
         new_create_states = {}
@@ -672,14 +679,18 @@ class MapFrame(ttk.Frame):
         for tag in sorted(new_create_states.keys()):
             provs = sorted(new_create_states[tag])
             provs_str = " ".join(provs)
-            lines.append(f"    create_state = {{")
-            lines.append(f"        country = c:{tag}")
-            lines.append(f"        owned_provinces = {{ {provs_str} }}")
-            lines.append(f"    }}")
+            lines.append(f"{indent}    create_state = {{")
+            lines.append(f"{indent}        country = c:{tag}")
+            lines.append(f"{indent}        owned_provinces = {{ {provs_str} }}")
+            lines.append(f"{indent}    }}")
 
         if other_content:
             for line in other_content.splitlines():
-                lines.append(f"    {line}" if line.strip() else line)
+                stripped = line.strip()
+                if stripped:
+                    lines.append(f"{indent}    {stripped}")
+                else:
+                    lines.append("")
 
-        lines.append("}")
+        lines.append(f"{indent}}}")
         return "\n".join(lines) + "\n"
