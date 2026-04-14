@@ -1,10 +1,9 @@
-"""
+﻿"""
 Map Editor pour Victoria 3
-- Affiche provinces.png coloriee par pays (d'apres 00_states.txt du mod)
-- Gere les split states (plusieurs pays dans un meme etat)
-- Clic = selectionne le sous-etat sous le curseur (state_name, tag)
-- Ctrl+Clic = multi-selection
-- Transfert de sous-etats vers un autre TAG + sauvegarde dans 00_states.txt
+- Modes STATE et PROVINCE
+- Mode STATE: sélection par sous-état (comportement original)
+- Mode PROVINCE: sélection par province, provinces encadrées en noir
+- Transfert de provinces entre pays avec réécriture complète des states
 """
 
 import tkinter as tk
@@ -12,6 +11,7 @@ from tkinter import ttk, messagebox
 import os
 import re
 import threading
+import shutil
 import numpy as np
 from PIL import Image, ImageTk
 
@@ -21,10 +21,14 @@ SR_DIR    = os.path.join(DATA_DIR, "map_data", "state_regions")
 
 OCEAN_COLOR   = (30,  45,  80)
 UNKNOWN_COLOR = (70,  70,  70)
-BORDER_COLOR  = (180, 30,  30)   # rouge bordure entre sous-etats
-SELECT_BOOST  = 70               # luminosite ajoutee a la selection
+STATE_BORDER_COLOR = (180, 30,  30)   # rouge bordure entre états
+PROV_BORDER_COLOR  = (0,   0,   0)    # noir bordure entre provinces
+SELECT_BOOST  = 70
 INITIAL_ZOOM  = 0.22
 ZOOM_STEP     = 1.25
+
+MODE_STATE    = "state"
+MODE_PROVINCE = "province"
 
 
 # ============================================================
@@ -32,12 +36,6 @@ ZOOM_STEP     = 1.25
 # ============================================================
 
 def parse_state_regions(sr_dir):
-    """
-    Retourne:
-      prov_to_state : {province_hex: STATE_NAME}
-      state_to_provs: {STATE_NAME: set(province_hex)}
-      sea_states    : set(STATE_NAME) — etats oceaniques (99_seas.txt)
-    """
     prov_to_state  = {}
     state_to_provs = {}
     sea_states     = set()
@@ -74,15 +72,6 @@ def parse_state_regions(sr_dir):
 
 
 def parse_states_file(states_path):
-    """
-    Parse 00_states.txt avec support des split states.
-
-    Retourne:
-      prov_owner_map : {province_hex: TAG}
-          → ownership par province (gere les split states)
-      substates      : {(STATE_NAME, TAG): set(province_hex)}
-          → regroupement par sous-etat pour la selection/highlight
-    """
     prov_owner_map = {}
     substates      = {}
 
@@ -104,7 +93,6 @@ def parse_states_file(states_path):
             i += 1
         state_block = content[start:i - 1]
 
-        # Chaque create_state = { country = c:TAG  owned_provinces = { ... } }
         for cs_match in re.finditer(r'create_state\s*=\s*\{', state_block):
             cs_start = cs_match.end()
             depth2, j = 1, cs_start
@@ -133,7 +121,6 @@ def parse_states_file(states_path):
 
 
 def parse_country_colors(country_defs_dir):
-    """Retourne {TAG: (R, G, B)}"""
     colors = {}
     if not os.path.isdir(country_defs_dir):
         return colors
@@ -168,32 +155,24 @@ def parse_country_colors(country_defs_dir):
 # ============================================================
 
 def _random_country_color(tag):
-    """Couleur aleatoire stable par hash du TAG."""
     import hashlib
     h = hashlib.md5(tag.encode()).digest()
     return (80 + h[0] % 150, 80 + h[1] % 150, 80 + h[2] % 150)
 
 
-def build_render(provinces_arr, prov_to_state, prov_owner_map, country_colors, sea_states=None):
-    """
-    Construit le rendu (H, W, 3).
-    - Couleur par province selon son TAG proprietaire
-    - Bordure rouge entre etats differents (pas entre splits du meme etat, pas en mer)
-    """
+def build_render(provinces_arr, prov_to_state, prov_owner_map, country_colors, sea_states=None, mode="state"):
     H, W = provinces_arr.shape[:2]
     sea_states = sea_states or set()
 
     r = provinces_arr[:, :, 0].astype(np.uint32)
     g = provinces_arr[:, :, 1].astype(np.uint32)
     b = provinces_arr[:, :, 2].astype(np.uint32)
-    prov_ints = (r << 16) | (g << 8) | b   # (H, W)
+    prov_ints = (r << 16) | (g << 8) | b
 
-    # --- Tables de lookup ---
-    color_table  = np.full((16_777_216, 3), fill_value=list(OCEAN_COLOR), dtype=np.uint8)
-    # IDs par STATE_NAME uniquement (pas par tag) → bordures entre etats, pas entre splits
-    # Les etats de mer et l'ocean restent a 0
+    color_table = np.full((16_777_216, 3), fill_value=list(OCEAN_COLOR), dtype=np.uint8)
     state_names = sorted(s for s in set(prov_to_state.values()) if s not in sea_states)
-    state_ids   = {s: idx + 1 for idx, s in enumerate(state_names)}
+    state_ids = {s: idx + 1 for idx, s in enumerate(state_names)}
+    
     border_table = np.zeros(16_777_216, dtype=np.uint32)
 
     fallback_cache = {}
@@ -217,85 +196,45 @@ def build_render(provinces_arr, prov_to_state, prov_owner_map, country_colors, s
             color = UNKNOWN_COLOR
 
         color_table[prov_int] = color
-        # ID border = 0 pour les etats oceaniques (pas de bordure en mer)
+        
         if state_name not in sea_states:
             border_table[prov_int] = state_ids.get(state_name, 0)
 
-    # Appliquer
-    rendered   = color_table[prov_ints]        # (H, W, 3)
-    border_map = border_table[prov_ints]       # (H, W) — ID etat par pixel (0 = ocean/mer)
+    rendered = color_table[prov_ints]
+    border_map = border_table[prov_ints]
 
-    # --- Bordures entre etats terrestres differents ---
-    land   = border_map > 0
+    # Bordure rouge entre états (toujours active)
+    land = border_map > 0
     h_diff = border_map[:, :-1] != border_map[:, 1:]
     v_diff = border_map[:-1, :] != border_map[1:, :]
     h_land = land[:, :-1] & land[:, 1:]
     v_land = land[:-1, :] & land[1:, :]
+    
+    state_border = np.zeros((H, W), dtype=bool)
+    state_border[:, :-1] |= h_diff & h_land
+    state_border[:, 1:]  |= h_diff & h_land
+    state_border[:-1, :] |= v_diff & v_land
+    state_border[1:, :]  |= v_diff & v_land
+    
+    rendered[state_border] = STATE_BORDER_COLOR
 
-    border = np.zeros((H, W), dtype=bool)
-    border[:, :-1] |= h_diff & h_land
-    border[:, 1:]  |= h_diff & h_land
-    border[:-1, :] |= v_diff & v_land
-    border[1:, :]  |= v_diff & v_land
+    # Bordure noire entre provinces (mode PROVINCE uniquement)
+    if mode == MODE_PROVINCE:
+        prov_border = np.zeros((H, W), dtype=bool)
+        # Comparer les provinces adjacentes (prov_ints contient l'ID province)
+        ph_diff = prov_ints[:, :-1] != prov_ints[:, 1:]
+        pv_diff = prov_ints[:-1, :] != prov_ints[1:, :]
+        prov_border[:, :-1] |= ph_diff
+        prov_border[:, 1:]  |= ph_diff
+        prov_border[:-1, :] |= pv_diff
+        prov_border[1:, :]  |= pv_diff
 
-    rendered[border] = BORDER_COLOR
+        # Ne pas dessiner sur les bordures d'état (rouge prioritaire)
+        prov_border &= ~state_border
+
+        rendered[prov_border] = PROV_BORDER_COLOR
 
     return rendered, prov_ints
-
-
-# ============================================================
-# SAUVEGARDE 00_STATES
-# ============================================================
-
-def transfer_substates_in_file(states_path, transfers):
-    """
-    transfers : liste de (state_name, old_tag, new_tag)
-    Modifie UNIQUEMENT le bloc create_state { country = c:old_tag } de chaque etat.
-    """
-    with open(states_path, "r", encoding="utf-8-sig") as fh:
-        content = fh.read()
-
-    for state_name, old_tag, new_tag in transfers:
-        sm = re.search(rf's:{re.escape(state_name)}\s*=\s*\{{', content)
-        if not sm:
-            continue
-
-        # Trouver la fin du bloc etat
-        start = sm.end()
-        depth, i = 1, start
-        while i < len(content) and depth > 0:
-            if content[i] == "{": depth += 1
-            elif content[i] == "}": depth -= 1
-            i += 1
-        state_end = i - 1
-        state_block = content[start:state_end]
-
-        # Trouver le create_state qui contient country = c:old_tag
-        new_state_block = state_block
-        for cs_match in re.finditer(r'create_state\s*=\s*\{', state_block):
-            cs_start = cs_match.end()
-            depth2, j = 1, cs_start
-            while j < len(state_block) and depth2 > 0:
-                if state_block[j] == "{": depth2 += 1
-                elif state_block[j] == "}": depth2 -= 1
-                j += 1
-            cs_full  = state_block[cs_match.start():j]
-            cs_inner = state_block[cs_start:j - 1]
-
-            tag_m = re.search(r'country\s*=\s*c:(\w+)', cs_inner)
-            if tag_m and tag_m.group(1) == old_tag:
-                new_cs = cs_full.replace(
-                    f'country = c:{old_tag}',
-                    f'country = c:{new_tag}',
-                    1
-                )
-                new_state_block = new_state_block.replace(cs_full, new_cs, 1)
-                break
-
-        content = content[:start] + new_state_block + content[state_end:]
-
-    with open(states_path, "w", encoding="utf-8-sig") as fh:
-        fh.write(content)
 
 
 # ============================================================
@@ -307,29 +246,24 @@ class MapFrame(ttk.Frame):
         super().__init__(parent)
         self.config = config
 
-        # Donnees carte
-        self._prov_arr       = None   # numpy (H, W, 3)
-        self._prov_ints      = None   # numpy (H, W)
-        self._rendered       = None   # numpy (H, W, 3)
-        self._prov_to_state  = {}     # {prov_hex: state_name}
-        self._state_to_provs = {}     # {state_name: set(prov_hex)}
-        self._prov_owner_map = {}     # {prov_hex: TAG}  ← par province
-        self._substates      = {}     # {(state, tag): set(prov_hex)}
+        self._prov_arr       = None
+        self._prov_ints      = None
+        self._rendered       = None
+        self._prov_to_state  = {}
+        self._state_to_provs = {}
+        self._prov_owner_map = {}
+        self._substates      = {}
         self._country_colors = {}
         self._sea_states     = set()
 
-        # UI
-        self._zoom     = INITIAL_ZOOM
-        self._photo    = None
-        self._selected = set()    # set de (state_name, tag)
-        self._pending  = {}       # {(state_name, old_tag): new_tag}
-        self._loading  = False
+        self._zoom       = INITIAL_ZOOM
+        self._photo      = None
+        self._selected   = set()
+        self._prov_selected = set()
+        self._loading    = False
+        self._mode       = MODE_STATE
 
         self._build()
-
-    # ----------------------------------------------------------
-    # UI
-    # ----------------------------------------------------------
 
     def _build(self):
         toolbar = ttk.Frame(self)
@@ -340,13 +274,26 @@ class MapFrame(ttk.Frame):
         ttk.Button(toolbar, text="Zoom -", command=self._zoom_out).pack(side="left", padx=2)
         self._zoom_label = ttk.Label(toolbar, text=f"Zoom: {int(self._zoom*100)}%")
         self._zoom_label.pack(side="left", padx=8)
+
+        # Boutons STATE / PROVINCE
+        mode_frame = ttk.Frame(toolbar)
+        mode_frame.pack(side="left", padx=20)
+        ttk.Label(mode_frame, text="Mode:", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 4))
+        
+        self._state_btn = ttk.Button(mode_frame, text="STATE", width=8,
+                                      command=lambda: self._set_mode(MODE_STATE))
+        self._state_btn.pack(side="left", padx=2)
+        
+        self._prov_btn = ttk.Button(mode_frame, text="PROVINCE", width=10,
+                                     command=lambda: self._set_mode(MODE_PROVINCE))
+        self._prov_btn.pack(side="left", padx=2)
+
         self._status_label = ttk.Label(toolbar, text="Appuie sur 'Charger la carte'", foreground="#888")
         self._status_label.pack(side="left", padx=10)
 
         main = ttk.Frame(self)
         main.pack(fill="both", expand=True)
 
-        # Canvas
         map_container = ttk.Frame(main)
         map_container.pack(side="left", fill="both", expand=True)
 
@@ -365,12 +312,11 @@ class MapFrame(ttk.Frame):
         self._canvas.bind("<Button-2>",          self._start_pan)
         self._canvas.bind("<B2-Motion>",         self._do_pan)
 
-        # Panneau droite
         panel = ttk.Frame(main, width=240)
         panel.pack(side="right", fill="y", padx=6, pady=4)
         panel.pack_propagate(False)
 
-        ttk.Label(panel, text="Selection (etat / TAG)", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        ttk.Label(panel, text="Sélection (état / TAG)", font=("Segoe UI", 9, "bold")).pack(anchor="w")
 
         lf = ttk.Frame(panel)
         lf.pack(fill="both", expand=True, pady=4)
@@ -380,7 +326,7 @@ class MapFrame(ttk.Frame):
         lb_sc.pack(side="right", fill="y")
         self._sel_listbox.pack(fill="both", expand=True)
 
-        ttk.Button(panel, text="Vider la selection", command=self._clear_selection).pack(fill="x", pady=2)
+        ttk.Button(panel, text="Vider la sélection", command=self._clear_selection).pack(fill="x", pady=2)
 
         ttk.Separator(panel, orient="horizontal").pack(fill="x", pady=5)
         ttk.Label(panel, text="Info province", font=("Segoe UI", 9, "bold")).pack(anchor="w")
@@ -389,11 +335,11 @@ class MapFrame(ttk.Frame):
         self._info_label.pack(anchor="w", pady=4)
 
         ttk.Separator(panel, orient="horizontal").pack(fill="x", pady=5)
-        ttk.Label(panel, text="Transferer vers TAG :", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        ttk.Label(panel, text="Transférer vers TAG :", font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self._new_tag = tk.StringVar()
         ttk.Entry(panel, textvariable=self._new_tag, width=10,
                   font=("Consolas", 11)).pack(fill="x", pady=4)
-        ttk.Button(panel, text="Transferer", command=self._transfer,
+        ttk.Button(panel, text="Transférer", command=self._transfer,
                    style="Accent.TButton").pack(fill="x", pady=2)
 
         ttk.Separator(panel, orient="horizontal").pack(fill="x", pady=5)
@@ -402,9 +348,35 @@ class MapFrame(ttk.Frame):
                                        wraplength=220)
         self._save_status.pack(anchor="w", pady=2)
 
-    # ----------------------------------------------------------
-    # CHARGEMENT
-    # ----------------------------------------------------------
+    def _set_mode(self, mode):
+        self._mode = mode
+        self._state_btn.configure(style="TButton")
+        self._prov_btn.configure(style="TButton")
+        if mode == MODE_STATE:
+            self._state_btn.configure(style="Accent.TButton")
+            self._status_label.config(text="Mode STATE — Cliquez pour sélectionner un sous-état")
+        else:
+            self._prov_btn.configure(style="Accent.TButton")
+            self._status_label.config(text="Mode PROVINCE — Cliquez pour sélectionner des provinces")
+        
+        self._clear_selection()
+        
+        if self._prov_arr is not None:
+            self._refresh_render()
+
+    def _refresh_render(self):
+        if self._prov_arr is None:
+            return
+        
+        rendered, prov_ints = build_render(
+            self._prov_arr, self._prov_to_state,
+            self._prov_owner_map, self._country_colors, self._sea_states,
+            mode=self._mode
+        )
+        self._rendered  = rendered
+        self._prov_ints = prov_ints
+        
+        self._display_map()
 
     def _start_load(self):
         if self._loading:
@@ -432,7 +404,7 @@ class MapFrame(ttk.Frame):
                 prov_owner_map, substates = parse_states_file(states_path)
             else:
                 vanilla = self.config.vanilla_path
-                vpath   = os.path.join(vanilla, "game/common/history/states/00_states.txt") if vanilla else ""
+                vpath = os.path.join(vanilla, "game/common/history/states/00_states.txt") if vanilla else ""
                 prov_owner_map, substates = parse_states_file(vpath) if os.path.exists(vpath) else ({}, {})
             self._prov_owner_map = prov_owner_map
             self._substates      = substates
@@ -454,19 +426,19 @@ class MapFrame(ttk.Frame):
 
             self._after("Rendu numpy (couleurs + bordures)...")
             rendered, prov_ints = build_render(
-                self._prov_arr, prov_to_state, prov_owner_map, country_colors, sea_states
+                self._prov_arr, prov_to_state, prov_owner_map, country_colors, sea_states,
+                mode=self._mode
             )
             self._rendered  = rendered
             self._prov_ints = prov_ints
 
-            # Stats split states
             split = sum(1 for s in set(k[0] for k in substates) if
                         len([k for k in substates if k[0] == s]) > 1)
 
             self.after(0, lambda: self._display_map())
             self.after(0, lambda: self._status_label.config(
-                text=f"Carte chargee — {len(prov_to_state)} provinces | "
-                     f"{len(state_to_provs)} etats | {split} split states"
+                text=f"Carte chargée — {len(prov_to_state)} provinces | "
+                     f"{len(state_to_provs)} états | {split} split states | Mode: {self._mode.upper()}"
             ))
 
         except Exception as e:
@@ -479,10 +451,6 @@ class MapFrame(ttk.Frame):
 
     def _after(self, msg):
         self.after(0, lambda m=msg: self._status_label.config(text=m))
-
-    # ----------------------------------------------------------
-    # AFFICHAGE
-    # ----------------------------------------------------------
 
     def _display_map(self):
         if self._rendered is None:
@@ -502,6 +470,18 @@ class MapFrame(ttk.Frame):
             arr[mask] = np.clip(
                 arr[mask].astype(np.int32) + SELECT_BOOST, 0, 255
             ).astype(np.uint8)
+        
+        if self._prov_selected:
+            mask = np.zeros(arr.shape[:2], dtype=bool)
+            for prov_hex in self._prov_selected:
+                try:
+                    prov_int = int(prov_hex[1:], 16)
+                except ValueError:
+                    continue
+                mask |= (self._prov_ints == prov_int)
+            arr[mask] = np.clip(
+                arr[mask].astype(np.int32) + SELECT_BOOST, 0, 255
+            ).astype(np.uint8)
 
         H, W   = arr.shape[:2]
         new_w  = max(1, int(W * self._zoom))
@@ -514,10 +494,6 @@ class MapFrame(ttk.Frame):
         self._canvas.create_image(0, 0, anchor="nw", image=self._photo)
         self._canvas.config(scrollregion=(0, 0, new_w, new_h))
         self._zoom_label.config(text=f"Zoom: {int(self._zoom*100)}%")
-
-    # ----------------------------------------------------------
-    # ZOOM / PAN
-    # ----------------------------------------------------------
 
     def _zoom_in(self):
         self._zoom = min(self._zoom * ZOOM_STEP, 2.0)
@@ -540,15 +516,7 @@ class MapFrame(ttk.Frame):
     def _do_pan(self, event):
         self._canvas.scan_dragto(event.x, event.y, gain=1)
 
-    # ----------------------------------------------------------
-    # SELECTION
-    # ----------------------------------------------------------
-
-    def _get_substate_at(self, canvas_x, canvas_y):
-        """
-        Retourne (state_name, tag, prov_hex) pour la position canvas.
-        Tient compte de l'ownership PAR PROVINCE (split states).
-        """
+    def _get_province_at(self, canvas_x, canvas_y):
         if self._prov_arr is None:
             return None, None, None
 
@@ -557,112 +525,157 @@ class MapFrame(ttk.Frame):
         ox = max(0, min(int(abs_x / self._zoom), self._prov_arr.shape[1] - 1))
         oy = max(0, min(int(abs_y / self._zoom), self._prov_arr.shape[0] - 1))
 
-        rgb     = self._prov_arr[oy, ox]
+        rgb = self._prov_arr[oy, ox]
         prov_hex = "x{:02X}{:02X}{:02X}".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
-        state   = self._prov_to_state.get(prov_hex)
-        tag     = self._prov_owner_map.get(prov_hex) if state else None
+        state = self._prov_to_state.get(prov_hex)
+        tag = self._prov_owner_map.get(prov_hex) if state else None
         return state, tag, prov_hex
 
     def _on_click(self, event):
         if self._rendered is None:
             return
-        state, tag, prov_hex = self._get_substate_at(event.x, event.y)
-        self._selected.clear()
-        if state and tag:
-            self._selected.add((state, tag))
+        
+        state, tag, prov_hex = self._get_province_at(event.x, event.y)
+        
+        if self._mode == MODE_STATE:
+            self._selected.clear()
+            self._prov_selected.clear()
+            if state and tag:
+                self._selected.add((state, tag))
+        else:
+            self._selected.clear()
+            self._prov_selected.clear()
+            if prov_hex and state:
+                self._prov_selected.add(prov_hex)
+        
         self._refresh_ui(state, tag, prov_hex)
 
     def _on_ctrl_click(self, event):
         if self._rendered is None:
             return
-        state, tag, prov_hex = self._get_substate_at(event.x, event.y)
-        if state and tag:
-            key = (state, tag)
-            if key in self._selected:
-                self._selected.discard(key)
-            else:
-                self._selected.add(key)
+        
+        state, tag, prov_hex = self._get_province_at(event.x, event.y)
+        
+        if self._mode == MODE_STATE:
+            if state and tag:
+                key = (state, tag)
+                if key in self._selected:
+                    self._selected.discard(key)
+                else:
+                    self._selected.add(key)
+        else:
+            if prov_hex:
+                if prov_hex in self._prov_selected:
+                    self._prov_selected.discard(prov_hex)
+                else:
+                    self._prov_selected.add(prov_hex)
+        
         self._refresh_ui(state, tag, prov_hex)
 
     def _refresh_ui(self, last_state=None, last_tag=None, last_prov=None):
         self._sel_listbox.delete(0, "end")
-        for (state, tag) in sorted(self._selected):
-            pending = self._pending.get((state, tag))
-            current = pending or tag
-            n_prov  = len(self._substates.get((state, tag), set()))
-            split   = len([k for k in self._substates if k[0] == state]) > 1
-            split_marker = " [SPLIT]" if split else ""
-            self._sel_listbox.insert("end", f"{state}{split_marker}  [{current}]  ({n_prov}p)")
+        
+        if self._mode == MODE_STATE:
+            for (state, tag) in sorted(self._selected):
+                n_prov = len(self._substates.get((state, tag), set()))
+                split = len([k for k in self._substates if k[0] == state]) > 1
+                split_marker = " [SPLIT]" if split else ""
+                self._sel_listbox.insert("end", f"{state}{split_marker}  [{tag}]  ({n_prov}p)")
+        else:
+            for prov in sorted(self._prov_selected):
+                tag = self._prov_owner_map.get(prov, "?")
+                state = self._prov_to_state.get(prov, "?")
+                self._sel_listbox.insert("end", f"{prov}  [{tag}]  ({state})")
 
         if last_state:
-            # Verifier si l'etat est split
-            all_parts = [(k, len(v)) for k, v in self._substates.items() if k[0] == last_state]
-            if len(all_parts) > 1:
-                parts_str = "  |  ".join(f"{t}({n}p)" for (_, t), n in all_parts)
-                split_info = f"\nSPLIT STATE: {parts_str}"
-            else:
-                split_info = ""
-            pending = self._pending.get((last_state, last_tag))
-            extra   = f"  (-> {pending})" if pending else ""
+            split_info = ""
+            if self._mode == MODE_STATE:
+                all_parts = [(k, len(v)) for k, v in self._substates.items() if k[0] == last_state]
+                if len(all_parts) > 1:
+                    parts_str = "  |  ".join(f"{t}({n}p)" for (_, t), n in all_parts)
+                    split_info = f"\nSPLIT: {parts_str}"
+            
             self._info_label.config(
-                text=f"Province : {last_prov}\nEtat     : {last_state}\nPays     : {last_tag or '?'}{extra}{split_info}"
+                text=f"Province : {last_prov}\nÉtat     : {last_state}\nPays     : {last_tag or '?'}{split_info}"
+            )
+        elif last_prov:
+            tag = self._prov_owner_map.get(last_prov, "?")
+            state = self._prov_to_state.get(last_prov, "?")
+            self._info_label.config(
+                text=f"Province : {last_prov}\nÉtat     : {state}\nPays     : {tag}"
             )
 
         self._display_map()
 
     def _clear_selection(self):
         self._selected.clear()
+        self._prov_selected.clear()
         self._sel_listbox.delete(0, "end")
         self._info_label.config(text="-")
         self._display_map()
 
-    # ----------------------------------------------------------
-    # TRANSFERT
-    # ----------------------------------------------------------
-
     def _transfer(self):
-        if not self._selected:
-            messagebox.showwarning("Attention", "Selectionne d'abord des sous-etats sur la carte")
-            return
         new_tag = self._new_tag.get().strip().upper()
         if not new_tag or len(new_tag) < 2:
             messagebox.showerror("Erreur", "Entre un TAG valide")
             return
 
-        for (state, old_tag) in self._selected:
-            # Mettre a jour prov_owner_map
+        if self._mode == MODE_STATE:
+            self._transfer_states(new_tag)
+        else:
+            self._transfer_provinces(new_tag)
+
+    def _transfer_states(self, new_tag):
+        if not self._selected:
+            messagebox.showwarning("Attention", "Sélectionne d'abord des sous-états sur la carte")
+            return
+
+        for (state, old_tag) in list(self._selected):
             for prov_hex in self._substates.get((state, old_tag), set()):
                 self._prov_owner_map[prov_hex] = new_tag
-            # Deplacer le sous-etat dans substates
             provs = self._substates.pop((state, old_tag), set())
             self._substates.setdefault((state, new_tag), set()).update(provs)
-            # Marquer comme pending
-            self._pending[(state, old_tag)] = new_tag
 
-        # Re-rendre avec les nouvelles couleurs
         rendered, _ = build_render(
             self._prov_arr, self._prov_to_state,
-            self._prov_owner_map, self._country_colors, self._sea_states
+            self._prov_owner_map, self._country_colors, self._sea_states,
+            mode=self._mode
         )
         self._rendered = rendered
 
-        # Mettre a jour la selection avec les nouvelles cles
         self._selected = {(state, new_tag) for (state, _) in self._selected}
 
         self._refresh_ui()
         self._save_status.config(
-            text=f"{len(self._pending)} sous-etat(s) modifie(s) (non sauvegarde)"
+            text=f"{len(self._selected)} sous-état(s) modifié(s) (non sauvegardé)"
         )
 
-    # ----------------------------------------------------------
-    # SAUVEGARDE
-    # ----------------------------------------------------------
-
-    def _save(self):
-        if not self._pending:
-            messagebox.showinfo("Info", "Aucune modification en attente")
+    def _transfer_provinces(self, new_tag):
+        if not self._prov_selected:
+            messagebox.showwarning("Attention", "Sélectionne d'abord des provinces sur la carte")
             return
 
+        for prov_hex in list(self._prov_selected):
+            old_tag = self._prov_owner_map.get(prov_hex)
+            state = self._prov_to_state.get(prov_hex)
+            
+            if not state or not old_tag:
+                continue
+
+            self._prov_owner_map[prov_hex] = new_tag
+            
+            if (state, old_tag) in self._substates:
+                self._substates[(state, old_tag)].discard(prov_hex)
+            self._substates.setdefault((state, new_tag), set()).add(prov_hex)
+
+        self._refresh_render()
+
+        self._save_status.config(
+            text=f"{len(self._prov_selected)} province(s) modifiée(s) (non sauvegardé)"
+        )
+        self._status_label.config(text=f"Mode PROVINCE — {len(self._prov_selected)} provinces transférées vers {new_tag}")
+
+    def _save(self):
         mod = self.config.mod_path
         if not mod:
             messagebox.showerror("Erreur", "Configure le dossier mod d'abord (Config)")
@@ -673,17 +686,88 @@ class MapFrame(ttk.Frame):
             messagebox.showerror("Erreur", f"Fichier introuvable:\n{states_path}")
             return
 
-        import shutil
         shutil.copy(states_path, states_path + ".backup")
+        self._rebuild_states_file(states_path)
 
-        # Construire la liste des transferts (state, old_tag, new_tag)
-        transfers = [(state, old_tag, new_tag)
-                     for (state, old_tag), new_tag in self._pending.items()]
+        self._save_status.config(text="Sauvegarde complète !")
+        messagebox.showinfo("Sauvegarde", "00_states.txt réécrit complètement\n(backup créé)")
 
-        transfer_substates_in_file(states_path, transfers)
+    def _rebuild_states_file(self, states_path):
+        with open(states_path, "r", encoding="utf-8-sig") as fh:
+            content = fh.read()
 
-        count = len(transfers)
-        self._pending.clear()
-        self._save_status.config(text=f"Sauvegarde ! {count} sous-etat(s) mis a jour")
-        messagebox.showinfo("Sauvegarde",
-                            f"{count} modification(s) ecrites dans 00_states.txt\n(backup cree)")
+        new_content = []
+        i = 0
+        
+        while i < len(content):
+            sm = re.match(r's:(STATE_\w+)\s*=\s*\{', content[i:])
+            if sm:
+                state_name = sm.group(1)
+                start_of_state = i + sm.start()
+                block_start = i + sm.end()
+                
+                depth = 1
+                j = block_start
+                while j < len(content) and depth > 0:
+                    if content[j] == "{": depth += 1
+                    elif content[j] == "}": depth -= 1
+                    j += 1
+                block_end = j - 1
+                
+                state_block = content[block_start:block_end]
+                
+                new_state = self._build_state_block(state_name, state_block)
+                
+                new_content.append(content[i:start_of_state])
+                new_content.append(new_state)
+                i = j
+            else:
+                new_content.append(content[i:])
+                break
+
+        result = "".join(new_content)
+        
+        with open(states_path, "w", encoding="utf-8-sig") as fh:
+            fh.write(result)
+
+    def _build_state_block(self, state_name, original_block):
+        create_states = []
+        rest_of_block = original_block
+        
+        for cs_match in re.finditer(r'create_state\s*=\s*\{', original_block):
+            cs_start = cs_match.start()
+            cs_end = cs_match.end()
+            depth, j = 1, cs_end
+            while j < len(original_block) and depth > 0:
+                if original_block[j] == "{": depth += 1
+                elif original_block[j] == "}": depth -= 1
+                j += 1
+            create_states.append(original_block[cs_start:j])
+            rest_of_block = original_block[:cs_start] + original_block[j:]
+        
+        other_content = rest_of_block.strip()
+        
+        lines = [f"s:{state_name} = {{"]
+        
+        new_create_states = {}
+        for (state, tag), provs in self._substates.items():
+            if state == state_name and provs:
+                if tag not in new_create_states:
+                    new_create_states[tag] = set()
+                new_create_states[tag].update(provs)
+        
+        for tag in sorted(new_create_states.keys()):
+            provs = sorted(new_create_states[tag])
+            provs_str = " ".join(provs)
+            lines.append(f"    create_state = {{")
+            lines.append(f"        country = c:{tag}")
+            lines.append(f"        owned_provinces = {{ {provs_str} }}")
+            lines.append(f"    }}")
+        
+        if other_content:
+            lines.append(other_content)
+
+        lines.append("}")
+
+        return "\n".join(lines) + "\n"
+
