@@ -73,39 +73,17 @@ def _parse_pops(state_inner):
     return [(c, totals[c]) for c in order]
 
 
-def _parse_buildings(state_inner):
-    """Somme les niveaux de bâtiments depuis tous les region_state d'un état.
-    Retourne [(name, {level, reserves, has_reserves, extras}), ...] en ordre d'apparition."""
-    result = {}
-    order = []
-    for rs in re.finditer(r'region_state:\w+\s*=\s*\{', state_inner):
-        rs_end = _block_end(state_inner, rs.end())
-        rs_content = state_inner[rs.end():rs_end - 1]
-        for bm in re.finditer(r'create_building\s*=\s*\{', rs_content):
-            be = _block_end(rs_content, bm.end())
-            b = rs_content[bm.end():be - 1]
-            nm = re.search(r'\bbuilding\s*=\s*(\w+)', b)
-            lm = re.search(r'\blevel\s*=\s*(\d+)', b)
-            if not nm or not lm:
-                continue
-            name = nm.group(1)
-            level = int(lm.group(1))
-            rm = re.search(r'\breserves\s*=\s*(\d+)', b)
-            reserves = int(rm.group(1)) if rm else 0
-            if name not in result:
-                order.append(name)
-                result[name] = {'level': 0, 'reserves': 0, 'has_reserves': False, 'extras': []}
-            result[name]['level'] += level
-            result[name]['reserves'] += reserves
-            if rm:
-                result[name]['has_reserves'] = True
-            # Capturer activate_production_methods et autres blocs supplémentaires
-            for apm in re.finditer(r'activate_production_methods\s*=\s*\{', b):
-                ae = _block_end(b, apm.end())
-                apm_str = b[apm.start():ae].strip()
-                if apm_str not in result[name]['extras']:
-                    result[name]['extras'].append(apm_str)
-    return [(n, result[n]) for n in order]
+def _get_first_region_state(state_inner):
+    """Extrait le TAG et le contenu brut du premier region_state trouvé dans un bloc d'état.
+    Retourne (first_tag, raw_content_between_braces) ou (None, None) si absent."""
+    sm = re.search(r'region_state:(\w+)\s*=\s*\{', state_inner)
+    if not sm:
+        return None, None
+    first_tag = sm.group(1)
+    end_pos = _block_end(state_inner, sm.end())
+    # Contenu brut entre { et } (avec indentation originale)
+    first_content = state_inner[sm.end():end_pos - 1]
+    return first_tag, first_content
 
 
 # ─────────────────────────────────────────────────────────────
@@ -132,36 +110,31 @@ def _write_pops_block(state_name, pops, proportions, ind):
     return "\n".join(lines)
 
 
-def _write_buildings_block(state_name, buildings, proportions, ind):
-    """Construit le bloc s:STATE = { region_state:TAG = { create_building... } } pour les bâtiments."""
+def _write_buildings_copy(state_name, first_tag, first_content, new_owners, ind):
+    """Construit le bloc buildings par copie du premier region_state vers les nouveaux owners.
+
+    Règles :
+    - 1 owner  : copie le bloc en remplaçant c:first_tag → c:new_tag partout
+    - N owners : copie le bloc verbatim pour chaque owner (sans toucher add_ownership)
+    - 0 owner  : retourne le bloc vide (ne devrait pas arriver)
+    """
     T = '\t'
-    lines = [f"s:{state_name} = {{"]
-    for tag in sorted(proportions):
-        lines.append(f"{ind}{T}region_state:{tag} = {{")
-        for name, data in buildings:
-            lvl_dist = _distribute(data['level'], proportions)
-            res_dist = _distribute(data['reserves'], proportions)
-            lvl = lvl_dist.get(tag, 0)
-            if lvl <= 0:
-                continue
-            lines.append(f"{ind}{T}{T}create_building = {{")
-            lines.append(f"{ind}{T}{T}{T}building = {name}")
-            lines.append(f"{ind}{T}{T}{T}level = {lvl}")
-            if data['has_reserves']:
-                lines.append(f"{ind}{T}{T}{T}reserves = {res_dist.get(tag, 0)}")
-            for extra in data['extras']:
-                lines.append(f"{ind}{T}{T}{T}{extra}")
-            lines.append(f"{ind}{T}{T}}}")
-        lines.append(f"{ind}{T}}}")
-    lines.append(f"{ind}}}")
-    return "\n".join(lines)
+    if not new_owners:
+        return f"s:{state_name}={{\n{ind}}}"
+
+    out = f"s:{state_name}={{\n"
+    for new_tag in sorted(new_owners):
+        content = first_content.replace(f"c:{first_tag}", f"c:{new_tag}")
+        out += f"{ind}{T}region_state:{new_tag}={{{content}}}\n"
+    out += f"{ind}}}"
+    return out
 
 
 # ─────────────────────────────────────────────────────────────
 # MISE À JOUR D'UN FICHIER
 # ─────────────────────────────────────────────────────────────
 
-def _update_file(path, modified_states, proportions_map, file_type):
+def _update_file(path, modified_states, proportions_map, new_owners_map, file_type):
     """Réécrit les blocs d'états modifiés dans un fichier pops ou buildings.
     Retourne True si le fichier a été modifié."""
     with open(path, 'r', encoding='utf-8-sig') as f:
@@ -178,22 +151,29 @@ def _update_file(path, modified_states, proportions_map, file_type):
         start = i + sm.start()
         block_start = i + sm.end()
         j = _block_end(content, block_start)
-        if state in modified_states and state in proportions_map:
+        if state in modified_states:
             inner = content[block_start:j - 1]
-            # Détecter l'indentation du s:STATE dans ce fichier
             before = content[i:start]
             last_nl = before.rfind('\n')
             ind = before[last_nl + 1:] if last_nl >= 0 else ''
-            props = proportions_map[state]
-            if file_type == 'pops':
+            if file_type == 'pops' and state in proportions_map:
                 data = _parse_pops(inner)
-                new_block = _write_pops_block(state, data, props, ind)
+                new_block = _write_pops_block(state, data, proportions_map[state], ind)
+                parts.append(content[i:start])
+                parts.append(new_block)
+                changed = True
+            elif file_type == 'buildings' and state in new_owners_map:
+                first_tag, first_content = _get_first_region_state(inner)
+                if first_tag is not None:
+                    new_block = _write_buildings_copy(
+                        state, first_tag, first_content, new_owners_map[state], ind)
+                    parts.append(content[i:start])
+                    parts.append(new_block)
+                    changed = True
+                else:
+                    parts.append(content[i:j])
             else:
-                data = _parse_buildings(inner)
-                new_block = _write_buildings_block(state, data, props, ind)
-            parts.append(content[i:start])
-            parts.append(new_block)
-            changed = True
+                parts.append(content[i:j])
         else:
             parts.append(content[i:j])
         i = j
@@ -222,8 +202,9 @@ def update_history_files(mod_path, modified_states, substates):
     if not modified_states:
         return 0
 
-    # Calculer les proportions provinces-par-tag pour chaque état modifié
-    proportions_map = {}
+    proportions_map = {}   # pour pops  : {state: {tag: ratio}}
+    new_owners_map  = {}   # pour buildings : {state: [tag, ...]}
+
     for state in modified_states:
         tag_counts = {}
         for (s, tag), provs in substates.items():
@@ -232,8 +213,9 @@ def update_history_files(mod_path, modified_states, substates):
         total = sum(tag_counts.values())
         if total > 0:
             proportions_map[state] = {t: c / total for t, c in tag_counts.items()}
+            new_owners_map[state]  = sorted(tag_counts.keys())
 
-    if not proportions_map:
+    if not proportions_map and not new_owners_map:
         return 0
 
     updated = 0
@@ -246,7 +228,8 @@ def update_history_files(mod_path, modified_states, substates):
         for fname in sorted(os.listdir(folder)):
             if not fname.endswith('.txt'):
                 continue
-            if _update_file(os.path.join(folder, fname), modified_states, proportions_map, ftype):
+            if _update_file(os.path.join(folder, fname), modified_states,
+                            proportions_map, new_owners_map, ftype):
                 updated += 1
 
     return updated
