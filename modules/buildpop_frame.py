@@ -1130,27 +1130,36 @@ class BuildPopFrame(ttk.Frame):
             shutil.copy(path, path + '.backup')
 
         T = '\t'
-        lines = [f"s:{state} = {{"]
+        lines = [f"{T}s:{state} = {{"]
         for tag in all_tags:
             if tag == edited_tag:
                 tag_pops = pops
             else:
                 tag_pops = self._pops_data.get(state, {}).get(tag, [])
-            lines.append(f"{T}region_state:{tag} = {{")
+            lines.append(f"{T}{T}region_state:{tag} = {{")
             for culture, size in tag_pops:
-                lines.append(f"{T}{T}create_pop = {{")
-                lines.append(f"{T}{T}{T}culture = {culture}")
-                lines.append(f"{T}{T}{T}size = {size}")
-                lines.append(f"{T}{T}}}")
-            lines.append(f"{T}}}")
-        lines.append("}")
+                lines.append(f"{T}{T}{T}create_pop = {{")
+                lines.append(f"{T}{T}{T}{T}culture = {culture}")
+                lines.append(f"{T}{T}{T}{T}size = {size}")
+                lines.append(f"{T}{T}{T}}}")
+            lines.append(f"{T}{T}}}")
+        lines.append(f"{T}}}")
         new_block = "\n".join(lines)
 
         pat = re.compile(rf's:{re.escape(state)}\s*=\s*\{{')
+        # Supprimer les tabulations/espaces avant le bloc pour éviter les incohérences
         sm = pat.search(content)
         if sm:
             end = _block_end(content, sm.end())
-            new_content = content[:sm.start()] + new_block + content[end:]
+            # Trouver le début de la ligne (enlever les tabulations/espaces avant)
+            start = sm.start()
+            while start > 0 and content[start-1] in ' \t':
+                start -= 1
+            # Ajouter newline si nécessaire
+            prefix = ""
+            if start > 0 and content[start-1] != '\n':
+                prefix = "\n"
+            new_content = content[:start] + prefix + new_block + content[end:]
         else:
             new_content = content + ("\n" if content else "") + new_block + "\n"
 
@@ -1175,32 +1184,41 @@ class BuildPopFrame(ttk.Frame):
             shutil.copy(path, path + '.backup')
 
         T = '\t'
-        lines = [f"s:{state} = {{"]
+        lines = [f"{T}s:{state} = {{"]
         for tag in all_tags:
             if tag == edited_tag:
                 tag_blds = buildings
             else:
                 tag_blds = self._buildings_data.get(state, {}).get(tag, [])
-            lines.append(f"{T}region_state:{tag} = {{")
+            lines.append(f"{T}{T}region_state:{tag} = {{")
             for building, level in tag_blds:
-                lines.append(f"{T}{T}create_building = {{")
-                lines.append(f"{T}{T}{T}building = \"{building}\"")
-                lines.append(f"{T}{T}{T}add_ownership = {{")
-                lines.append(f"{T}{T}{T}{T}country = {{")
-                lines.append(f"{T}{T}{T}{T}{T}country = \"c:{tag}\"")
-                lines.append(f"{T}{T}{T}{T}{T}levels = {level}")
+                lines.append(f"{T}{T}{T}create_building = {{")
+                lines.append(f"{T}{T}{T}{T}building = \"{building}\"")
+                lines.append(f"{T}{T}{T}{T}add_ownership = {{")
+                lines.append(f"{T}{T}{T}{T}{T}country = {{")
+                lines.append(f"{T}{T}{T}{T}{T}{T}country = \"c:{tag}\"")
+                lines.append(f"{T}{T}{T}{T}{T}{T}levels = {level}")
+                lines.append(f"{T}{T}{T}{T}{T}}}")
                 lines.append(f"{T}{T}{T}{T}}}")
                 lines.append(f"{T}{T}{T}}}")
-                lines.append(f"{T}{T}}}")
-            lines.append(f"{T}}}")
-        lines.append("}")
+            lines.append(f"{T}{T}}}")
+        lines.append(f"{T}}}")
         new_block = "\n".join(lines)
 
+        # Supprimer les tabulations/espaces avant le bloc pour éviter les incohérences
         pat = re.compile(rf's:{re.escape(state)}\s*=\s*\{{')
         sm = pat.search(content)
         if sm:
             end = _block_end(content, sm.end())
-            new_content = content[:sm.start()] + new_block + content[end:]
+            # Trouver le début de la ligne (enlever les tabulations/espaces avant)
+            start = sm.start()
+            while start > 0 and content[start-1] in ' \t':
+                start -= 1
+            # Ajouter newline si nécessaire
+            prefix = ""
+            if start > 0 and content[start-1] != '\n':
+                prefix = "\n"
+            new_content = content[:start] + prefix + new_block + content[end:]
         else:
             new_content = content + ("\n" if content else "") + new_block + "\n"
 
