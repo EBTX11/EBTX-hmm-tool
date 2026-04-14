@@ -5,6 +5,7 @@ Map Editor pour Victoria 3
 - Mode PROVINCE: sélection par province, provinces encadrées en noir
 - Transfert de provinces entre pays avec réécriture complète des states
 - Mode PEINTURE: switch pour peindre directement province ou sous-état sur clic gauche
+- Éditeur Homeland/Claim avec autocomplete sur les cultures
 """
 
 import tkinter as tk
@@ -22,8 +23,8 @@ PROV_PNG  = os.path.join(DATA_DIR, "map_data", "provinces.png")
 SR_DIR    = os.path.join(DATA_DIR, "map_data", "state_regions")
 
 OCEAN_COLOR   = (30,  45,  80)
-UNKNOWN_COLOR = (70,  70,  70)
-STATE_BORDER_COLOR = (180, 30,  30)
+UNKNOWN_COLOR = (70, 70, 70)
+STATE_BORDER_COLOR = (180, 30, 30)
 PROV_BORDER_COLOR  = (0,   0,   0)
 SELECT_BOOST  = 70
 INITIAL_ZOOM  = 0.22
@@ -173,6 +174,18 @@ def parse_homelands_claims(states_path):
     return result
 
 
+def parse_cultures(culture_file):
+    """Parse toutes les cultures depuis le fichier culture."""
+    cultures = []
+    if not os.path.exists(culture_file):
+        return cultures
+    with open(culture_file, "r", encoding="utf-8-sig") as fh:
+        content = fh.read()
+    for sm in re.finditer(r'^(\w+)\s*=\s*\{', content, re.MULTILINE):
+        cultures.append(sm.group(1))
+    return sorted(cultures)
+
+
 def build_render(provinces_arr, prov_to_state, prov_owner_map, country_colors, sea_states=None, mode="state"):
     H, W = provinces_arr.shape[:2]
     sea_states = sea_states or set()
@@ -255,6 +268,7 @@ class MapFrame(ttk.Frame):
         self._prov_ints_zoomed = None
         self._zoom_at_cache = None
         self._state_hc = {}
+        self._cultures = []
         self._build()
 
     def _build(self):
@@ -313,8 +327,11 @@ class MapFrame(ttk.Frame):
         self._hl_labels_frame.pack(fill="x")
         h_add = ttk.Frame(hf)
         h_add.pack(fill="x", pady=2)
-        self._hl_entry = tk.StringVar()
-        ttk.Entry(h_add, textvariable=self._hl_entry, width=16, font=("Consolas", 9)).pack(side="left", fill="x", expand=True)
+        self._hl_var = tk.StringVar()
+        self._hl_combo = ttk.Combobox(h_add, textvariable=self._hl_var, width=14, font=("Consolas", 9))
+        self._hl_combo.pack(side="left", fill="x", expand=True)
+        self._hl_combo.bind("<<ComboboxSelected>>", lambda e: self._add_hc("homeland"))
+        self._hl_combo.bind("<KeyRelease>", self._on_hl_keyrelease)
         ttk.Button(h_add, text="+", width=3, command=lambda: self._add_hc("homeland")).pack(side="left", padx=2)
 
         ttk.Separator(panel, orient="horizontal").pack(fill="x", pady=3)
@@ -328,6 +345,7 @@ class MapFrame(ttk.Frame):
         self._cl_entry = tk.StringVar()
         ttk.Entry(c_add, textvariable=self._cl_entry, width=16, font=("Consolas", 9)).pack(side="left", fill="x", expand=True)
         ttk.Button(c_add, text="+", width=3, command=lambda: self._add_hc("claim")).pack(side="left", padx=2)
+
 
         ttk.Button(panel, text="Sauver Homeland/Claim", command=self._save_hc).pack(fill="x", pady=4)
 
@@ -441,6 +459,10 @@ class MapFrame(ttk.Frame):
             self._zoom_at_cache = None
             split = sum(1 for s in set(k[0] for k in substates) if len([k for k in substates if k[0] == s]) > 1)
             self._state_hc = parse_homelands_claims(states_path) if states_path and os.path.exists(states_path) else {}
+            # Charger les cultures
+            culture_file = os.path.join(DATA_DIR, "cultures", "00_culture.txt")
+            self._cultures = parse_cultures(culture_file)
+            self.after(0, self._init_hl_combo)
             self.after(0, self._display_map)
             self.after(0, lambda: self._status_label.config(
                 text=f"Carte chargee -- {len(prov_to_state)} provinces | "
@@ -457,7 +479,6 @@ class MapFrame(ttk.Frame):
         self.after(0, lambda m=msg: self._status_label.config(text=m))
 
     def _rebuild_zoom_cache(self):
-        """Redimensionne _rendered et _prov_ints au zoom courant et les cache."""
         if self._rendered is None:
             return
         H, W = self._rendered.shape[:2]
@@ -471,7 +492,6 @@ class MapFrame(ttk.Frame):
         self._zoom_at_cache = self._zoom
 
     def _fast_update_provinces(self, prov_hex_set, new_tag):
-        """Recolore des provinces directement dans _rendered sans rebuild complet."""
         if self._rendered is None or self._prov_ints is None:
             return
         color = self._country_colors.get(new_tag) or _random_country_color(new_tag)
@@ -487,17 +507,14 @@ class MapFrame(ttk.Frame):
         if self._state_border_mask is not None:
             mask &= ~self._state_border_mask
         self._rendered[mask] = color
-        self._zoom_at_cache = None  # invalider le cache zoom
+        self._zoom_at_cache = None
 
     def _display_map(self):
         if self._rendered is None:
             return
-        # Rebuilder le cache zoom seulement si nécessaire
         if self._zoom_at_cache != self._zoom or self._zoomed_arr is None:
             self._rebuild_zoom_cache()
-        # Travailler sur l'image zoomée (beaucoup plus petite que la full-res)
         arr = self._zoomed_arr.copy()
-        # Appliquer la sélection sur l'image zoomée
         if (self._selected or self._prov_selected) and self._prov_ints_zoomed is not None:
             prov_ints_sel = []
             for (state, tag) in self._selected:
@@ -623,7 +640,6 @@ class MapFrame(ttk.Frame):
                     self._prov_selected.add(prov_hex)
         self._refresh_ui(state, tag, prov_hex)
 
-
     def _on_right_click(self, event):
         if self._rendered is None:
             return
@@ -675,7 +691,6 @@ class MapFrame(ttk.Frame):
         self._display_map()
 
     def _refresh_hc_ui(self, state_name):
-        """Met a jour l'affichage homelands/claims pour l'etat selectionne."""
         for w in self._hl_labels_frame.winfo_children():
             w.destroy()
         for w in self._cl_labels_frame.winfo_children():
@@ -706,24 +721,37 @@ class MapFrame(ttk.Frame):
             data[key].remove(value)
         self._refresh_hc_ui(state)
 
+    def _on_hl_keyrelease(self, event):
+        value = self._hl_var.get().lower()
+        if value:
+            matches = [c for c in self._cultures if c.lower().startswith(value)]
+            self._hl_combo['values'] = matches[:20]
+        else:
+            self._hl_combo['values'] = self._cultures[:20]
+
+    def _init_hl_combo(self):
+        self._hl_combo['values'] = self._cultures[:20]
+
     def _add_hc(self, kind):
         state = self._get_selected_state()
         if not state:
             messagebox.showwarning("Attention", "Selectionne d'abord un etat")
             return
-        entry = self._hl_entry if kind == 'homeland' else self._cl_entry
-        value = entry.get().strip().lower()
+        if kind == 'homeland':
+            value = self._hl_var.get().strip()
+            self._hl_var.set("")
+        else:
+            value = self._cl_entry.get().strip().lower()
+            self._cl_entry.set("")
         if not value:
             return
         key = 'homelands' if kind == 'homeland' else 'claims'
         data = self._state_hc.setdefault(state, {'homelands': [], 'claims': []})
         if value not in data[key]:
             data[key].append(value)
-        entry.set("")
         self._refresh_hc_ui(state)
 
     def _get_selected_state(self):
-        """Recupere le nom de l'etat courant (dernier clique)."""
         if self._selected:
             return next(iter(self._selected))[0]
         if self._prov_selected:
@@ -732,7 +760,6 @@ class MapFrame(ttk.Frame):
         return None
 
     def _save_hc(self):
-        """Sauvegarde les homelands/claims pour l'etat selectionne uniquement."""
         state = self._get_selected_state()
         if not state:
             messagebox.showwarning("Attention", "Selectionne d'abord un etat")
@@ -747,7 +774,7 @@ class MapFrame(ttk.Frame):
             return
         shutil.copy(states_path, states_path + ".backup")
         self._update_hc_in_file(states_path, state)
-        self._hl_entry.set("")
+        self._hl_var.set("")
         self._cl_entry.set("")
         messagebox.showinfo("Sauvegarde", f"Homeland/Claim sauvegardes pour {state}")
 
@@ -847,12 +874,10 @@ class MapFrame(ttk.Frame):
         if n == 0:
             messagebox.showinfo("Sauvegarde", "Aucune modification a sauvegarder.")
             return
-        # Capturer AVANT _rebuild_states_file qui vide _modified_states
         states_snapshot = set(self._modified_states)
         substates_snapshot = {k: set(v) for k, v in self._substates.items()}
         shutil.copy(states_path, states_path + ".backup")
         self._rebuild_states_file(states_path)
-        # Mettre à jour pops et buildings proportionnellement
         try:
             updated_files = update_history_files(mod, states_snapshot, substates_snapshot)
         except Exception as e:
@@ -876,28 +901,21 @@ class MapFrame(ttk.Frame):
                 state_name = sm.group(1)
                 start_of_state = i + sm.start()
                 block_start = i + sm.end()
-
-                # Trouver la fin du bloc
                 depth, j = 1, block_start
                 while j < len(content) and depth > 0:
                     if content[j] == "{": depth += 1
                     elif content[j] == "}": depth -= 1
                     j += 1
-
                 if state_name in self._modified_states:
-                    # Détecter l'indentation réelle du s:STATE dans le fichier
                     before = content[i:start_of_state]
                     last_nl = before.rfind('\n')
                     indent = before[last_nl + 1:] if last_nl >= 0 else ''
-
                     state_block = content[block_start:j - 1]
                     new_state = self._build_state_block(state_name, state_block, indent)
                     new_content.append(content[i:start_of_state])
                     new_content.append(new_state)
                 else:
-                    # State non modifié : conserver le bloc original tel quel
                     new_content.append(content[i:j])
-
                 i = j
             else:
                 new_content.append(content[i:])
@@ -907,7 +925,6 @@ class MapFrame(ttk.Frame):
         self._modified_states.clear()
 
     def _build_state_block(self, state_name, original_block, indent=""):
-        # Retirer les create_state existants, garder le reste (add_claim, add_homeland, etc.)
         rest_of_block = original_block
         for cs_match in reversed(list(re.finditer(r'create_state\s*=\s*\{', original_block))):
             cs_end = cs_match.end()
@@ -918,15 +935,11 @@ class MapFrame(ttk.Frame):
                 j += 1
             rest_of_block = rest_of_block[:cs_match.start()] + rest_of_block[j:]
         other_content = rest_of_block.strip()
-
-        # Pas d'indent sur la première ligne : content[i:start_of_state] le fournit déjà
         lines = [f"s:{state_name} = {{"]
-
         new_create_states = {}
         for (state, tag), provs in self._substates.items():
             if state == state_name and provs:
                 new_create_states.setdefault(tag, set()).update(provs)
-
         for tag in sorted(new_create_states.keys()):
             provs = sorted(new_create_states[tag])
             provs_str = " ".join(provs)
@@ -934,7 +947,6 @@ class MapFrame(ttk.Frame):
             lines.append(f"{indent}        country = c:{tag}")
             lines.append(f"{indent}        owned_provinces = {{ {provs_str} }}")
             lines.append(f"{indent}    }}")
-
         if other_content:
             for line in other_content.splitlines():
                 stripped = line.strip()
@@ -942,6 +954,5 @@ class MapFrame(ttk.Frame):
                     lines.append(f"{indent}    {stripped}")
                 else:
                     lines.append("")
-
         lines.append(f"{indent}}}")
         return "\n".join(lines)
