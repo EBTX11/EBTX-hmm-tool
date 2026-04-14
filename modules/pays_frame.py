@@ -142,7 +142,163 @@ class PaysFrame(ttk.Frame):
         f = ttk.Frame(nb)
         nb.add(f, text="Lois")
 
-        ttk.Label(f, text="Gestion des lois").pack(pady=10)
+        self._law_groups = {}
+        self._law_vars = {}
+        self._current_law_file = ""
+
+        self._parse_laws()
+
+        top = ttk.Frame(f)
+        top.pack(fill="x", padx=15, pady=10)
+
+        ttk.Label(top, text="TAG :").pack(side="left")
+        self._mod_tag = tk.StringVar()
+        ttk.Entry(top, textvariable=self._mod_tag, width=8).pack(side="left", padx=5)
+        ttk.Button(top, text="Charger pays", command=self._load_country_laws).pack(side="left", padx=5)
+        self._mod_status = ttk.Label(top, text="")
+        self._mod_status.pack(side="left", padx=10)
+
+        canvas = tk.Canvas(f, borderwidth=0, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(f, orient="vertical", command=canvas.yview)
+        self._law_scroll_frame = ttk.Frame(canvas)
+
+        self._law_scroll_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=self._law_scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True, padx=10)
+        scrollbar.pack(side="right", fill="y")
+
+        self._build_law_grid()
+
+        ttk.Button(f, text="Appliquer les lois", command=self._apply_laws).pack(pady=8)
+
+    def _parse_laws(self):
+        laws_dir = os.path.join(DATA_DIR, "laws")
+        if not os.path.exists(laws_dir):
+            return
+        for fname in os.listdir(laws_dir):
+            if not fname.endswith(".txt"):
+                continue
+            with open(os.path.join(laws_dir, fname), "r", encoding="utf-8-sig") as fh:
+                content = fh.read()
+            for law, group in re.findall(
+                r'(law_\w+)\s*=\s*{[^}]*?group\s*=\s*(lawgroup_\w+)', content, re.DOTALL
+            ):
+                self._law_groups.setdefault(group, []).append(law)
+        for g in self._law_groups:
+            self._law_groups[g] = sorted(set(self._law_groups[g]))
+
+    def _build_law_grid(self):
+        for widget in self._law_scroll_frame.winfo_children():
+            widget.destroy()
+        self._law_vars.clear()
+
+        groups = sorted(self._law_groups.keys())
+        col_frame = None
+        for i, group in enumerate(groups):
+            if i % 10 == 0:
+                col_frame = ttk.Frame(self._law_scroll_frame)
+                col_frame.pack(side="left", padx=10, anchor="n")
+            row = ttk.Frame(col_frame)
+            row.pack(anchor="w", pady=2)
+            ttk.Label(row, text=group, font=("Segoe UI", 8)).pack(anchor="w")
+            var = tk.StringVar()
+            self._law_vars[group] = var
+            options = [""] + self._law_groups[group]
+            om = ttk.OptionMenu(row, var, *options)
+            om.config(width=30)
+            om.pack(anchor="w")
+
+    def _load_country_laws(self):
+        mod = self.config.mod_path
+        if not mod:
+            messagebox.showerror("Erreur", "Configure le dossier mod d'abord")
+            return
+        tag = self._mod_tag.get().strip().upper()
+        if not tag:
+            return
+
+        path = os.path.join(mod, "common", "history", "countries")
+        file_path = None
+        if os.path.exists(path):
+            for fname in os.listdir(path):
+                if fname.lower().startswith(tag.lower()):
+                    file_path = os.path.join(path, fname)
+                    break
+
+        if not file_path:
+            messagebox.showerror("Erreur", f"Fichier pays introuvable pour {tag}")
+            return
+
+        self._current_law_file = file_path
+        with open(file_path, "r", encoding="utf-8") as fh:
+            content = fh.read()
+
+        laws_found = re.findall(r'activate_law\s*=\s*law_type:(\w+)', content)
+        for g in self._law_vars:
+            self._law_vars[g].set("")
+        for law in laws_found:
+            for group, values in self._law_groups.items():
+                if law in values:
+                    self._law_vars[group].set(law)
+
+        self._mod_status.config(text=f"Chargé: {os.path.basename(file_path)}")
+
+    def _apply_laws(self):
+        if not self._current_law_file:
+            messagebox.showerror("Erreur", "Charge d'abord un pays")
+            return
+        new_laws = [v.get() for v in self._law_vars.values() if v.get()]
+        if not new_laws:
+            messagebox.showerror("Erreur", "Aucune loi sélectionnée")
+            return
+
+        tag = self._mod_tag.get().strip().upper()
+        with open(self._current_law_file, "r", encoding="utf-8") as fh:
+            content = fh.read()
+
+        content = self._replace_laws(content, new_laws, tag)
+        with open(self._current_law_file, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        messagebox.showinfo("OK", "Lois mises à jour !")
+
+    def _replace_laws(self, content, new_laws, tag):
+        match = re.search(rf'c:{tag}\s*\??=\s*{{', content, re.IGNORECASE)
+        if not match:
+            return content
+        start = match.end()
+        brace = 1
+        i = start
+        end = start
+        while i < len(content):
+            if content[i] == "{":
+                brace += 1
+            elif content[i] == "}":
+                brace -= 1
+            if brace == 0:
+                end = i
+                break
+            i += 1
+
+        block = content[start:end]
+        block = re.sub(r'\n\s*effect_starting_politics_\w+\s*=\s*yes', '', block)
+        old_laws = re.findall(r'activate_law\s*=\s*law_type:(\w+)', block)
+        final = old_laws.copy()
+        for new in new_laws:
+            for group, laws in self._law_groups.items():
+                if new in laws:
+                    final = [l for l in final if l not in laws]
+                    final.append(new)
+        block = re.sub(r'\s*activate_law\s*=\s*law_type:\w+', '', block)
+        law_block = ""
+        for law in sorted(set(final)):
+            law_block += f"\n\t\tactivate_law = law_type:{law}"
+        new_block = law_block + "\n" + block
+        return content[:start] + new_block + content[end:]
 
     def _tab_tech(self, nb):
         f = TechFrame(nb, self.config)
