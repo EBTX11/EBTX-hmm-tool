@@ -15,6 +15,7 @@ import threading
 import shutil
 import numpy as np
 from PIL import Image, ImageTk
+from modules.history_updater import update_history_files
 
 DATA_DIR  = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 PROV_PNG  = os.path.join(DATA_DIR, "map_data", "provinces.png")
@@ -192,7 +193,7 @@ def build_render(provinces_arr, prov_to_state, prov_owner_map, country_colors, s
         prov_border[1:, :]  |= pv_diff
         prov_border &= ~state_border
         rendered[prov_border] = PROV_BORDER_COLOR
-    return rendered, prov_ints
+    return rendered, prov_ints, state_border
 
 
 class MapFrame(ttk.Frame):
@@ -216,6 +217,10 @@ class MapFrame(ttk.Frame):
         self._loading = False
         self._mode = MODE_STATE
         self._modified_states = set()
+        self._state_border_mask = None
+        self._zoomed_arr = None
+        self._prov_ints_zoomed = None
+        self._zoom_at_cache = None
         self._build()
 
     def _build(self):
@@ -314,12 +319,14 @@ class MapFrame(ttk.Frame):
     def _refresh_render(self):
         if self._prov_arr is None:
             return
-        rendered, prov_ints = build_render(
+        rendered, prov_ints, state_border = build_render(
             self._prov_arr, self._prov_to_state,
             self._prov_owner_map, self._country_colors, self._sea_states,
             mode=self._mode)
         self._rendered = rendered
         self._prov_ints = prov_ints
+        self._state_border_mask = state_border
+        self._zoom_at_cache = None
         self._display_map()
 
     def _start_load(self):
@@ -363,11 +370,13 @@ class MapFrame(ttk.Frame):
             img = Image.open(PROV_PNG).convert("RGB")
             self._prov_arr = np.array(img)
             self._after("Rendu numpy...")
-            rendered, prov_ints = build_render(
+            rendered, prov_ints, state_border = build_render(
                 self._prov_arr, prov_to_state, prov_owner_map,
                 country_colors, sea_states, mode=self._mode)
             self._rendered = rendered
             self._prov_ints = prov_ints
+            self._state_border_mask = state_border
+            self._zoom_at_cache = None
             split = sum(1 for s in set(k[0] for k in substates) if len([k for k in substates if k[0] == s]) > 1)
             self.after(0, self._display_map)
             self.after(0, lambda: self._status_label.config(
@@ -384,37 +393,72 @@ class MapFrame(ttk.Frame):
     def _after(self, msg):
         self.after(0, lambda m=msg: self._status_label.config(text=m))
 
+    def _rebuild_zoom_cache(self):
+        """Redimensionne _rendered et _prov_ints au zoom courant et les cache."""
+        if self._rendered is None:
+            return
+        H, W = self._rendered.shape[:2]
+        new_w = max(1, int(W * self._zoom))
+        new_h = max(1, int(H * self._zoom))
+        ys = np.linspace(0, H - 1, new_h).astype(np.int32)
+        xs = np.linspace(0, W - 1, new_w).astype(np.int32)
+        self._zoomed_arr = self._rendered[np.ix_(ys, xs)].copy()
+        if self._prov_ints is not None:
+            self._prov_ints_zoomed = self._prov_ints[np.ix_(ys, xs)]
+        self._zoom_at_cache = self._zoom
+
+    def _fast_update_provinces(self, prov_hex_set, new_tag):
+        """Recolore des provinces directement dans _rendered sans rebuild complet."""
+        if self._rendered is None or self._prov_ints is None:
+            return
+        color = self._country_colors.get(new_tag) or _random_country_color(new_tag)
+        prov_ints_list = []
+        for ph in prov_hex_set:
+            try:
+                prov_ints_list.append(int(ph[1:], 16))
+            except ValueError:
+                pass
+        if not prov_ints_list:
+            return
+        mask = np.isin(self._prov_ints, prov_ints_list)
+        if self._state_border_mask is not None:
+            mask &= ~self._state_border_mask
+        self._rendered[mask] = color
+        self._zoom_at_cache = None  # invalider le cache zoom
+
     def _display_map(self):
         if self._rendered is None:
             return
-        arr = self._rendered.copy()
-        if self._selected:
-            mask = np.zeros(arr.shape[:2], dtype=bool)
+        # Rebuilder le cache zoom seulement si nécessaire
+        if self._zoom_at_cache != self._zoom or self._zoomed_arr is None:
+            self._rebuild_zoom_cache()
+        # Travailler sur l'image zoomée (beaucoup plus petite que la full-res)
+        arr = self._zoomed_arr.copy()
+        # Appliquer la sélection sur l'image zoomée
+        if (self._selected or self._prov_selected) and self._prov_ints_zoomed is not None:
+            prov_ints_sel = []
             for (state, tag) in self._selected:
-                for prov_hex in self._substates.get((state, tag), set()):
+                for ph in self._substates.get((state, tag), set()):
                     try:
-                        prov_int = int(prov_hex[1:], 16)
+                        prov_ints_sel.append(int(ph[1:], 16))
                     except ValueError:
-                        continue
-                    mask |= (self._prov_ints == prov_int)
-            arr[mask] = np.clip(arr[mask].astype(np.int32) + SELECT_BOOST, 0, 255).astype(np.uint8)
-        if self._prov_selected:
-            mask = np.zeros(arr.shape[:2], dtype=bool)
-            for prov_hex in self._prov_selected:
+                        pass
+            for ph in self._prov_selected:
                 try:
-                    prov_int = int(prov_hex[1:], 16)
+                    prov_ints_sel.append(int(ph[1:], 16))
                 except ValueError:
-                    continue
-                mask |= (self._prov_ints == prov_int)
-            arr[mask] = np.clip(arr[mask].astype(np.int32) + SELECT_BOOST, 0, 255).astype(np.uint8)
-        H, W = arr.shape[:2]
-        new_w = max(1, int(W * self._zoom))
-        new_h = max(1, int(H * self._zoom))
-        pil_img = Image.fromarray(arr).resize((new_w, new_h), Image.NEAREST)
+                    pass
+            if prov_ints_sel:
+                mask = np.isin(self._prov_ints_zoomed, prov_ints_sel)
+                arr[mask] = np.clip(
+                    arr[mask].astype(np.int32) + SELECT_BOOST, 0, 255
+                ).astype(np.uint8)
+        pil_img = Image.fromarray(arr)
         self._photo = ImageTk.PhotoImage(pil_img)
         self._canvas.delete("all")
         self._canvas.create_image(0, 0, anchor="nw", image=self._photo)
-        self._canvas.config(scrollregion=(0, 0, new_w, new_h))
+        H, W = arr.shape[:2]
+        self._canvas.config(scrollregion=(0, 0, W, H))
         self._zoom_label.config(text=f"Zoom: {int(self._zoom*100)}%")
 
     def _zoom_in(self):
@@ -463,12 +507,13 @@ class MapFrame(ttk.Frame):
                     old_tag = tag
                     if old_tag != new_tag:
                         self._modified_states.add(state)
-                        for p in self._substates.get((state, tag), set()):
+                        provs = self._substates.pop((state, old_tag), set())
+                        for p in provs:
                             self._prov_owner_map[p] = new_tag
-                        provs = self._substates.pop((state, tag), set())
                         self._substates.setdefault((state, new_tag), set()).update(provs)
                         self._selected = {(state, new_tag)}
-                        self._refresh_render()
+                        self._fast_update_provinces(provs, new_tag)
+                        self._display_map()
                         self._status_label.config(text=f"Peint. {state} [{old_tag}] -> {new_tag}")
                     return
             self._selected.clear()
@@ -487,7 +532,8 @@ class MapFrame(ttk.Frame):
                         if (state, old_tag) in self._substates:
                             self._substates[(state, old_tag)].discard(prov_hex)
                         self._substates.setdefault((state, new_tag), set()).add(prov_hex)
-                        self._refresh_render()
+                        self._fast_update_provinces({prov_hex}, new_tag)
+                        self._display_map()
                         self._status_label.config(text=f"Peint. {prov_hex} -> {new_tag}")
                     return
             self._selected.clear()
@@ -577,17 +623,15 @@ class MapFrame(ttk.Frame):
         if not self._selected:
             messagebox.showwarning("Attention", "Selectionne d'abord des sous-etats")
             return
+        all_moved_provs = set()
         for (state, old_tag) in list(self._selected):
             self._modified_states.add(state)
-            for prov_hex in self._substates.get((state, old_tag), set()):
-                self._prov_owner_map[prov_hex] = new_tag
             provs = self._substates.pop((state, old_tag), set())
+            for prov_hex in provs:
+                self._prov_owner_map[prov_hex] = new_tag
             self._substates.setdefault((state, new_tag), set()).update(provs)
-        rendered, _ = build_render(
-            self._prov_arr, self._prov_to_state,
-            self._prov_owner_map, self._country_colors, self._sea_states,
-            mode=self._mode)
-        self._rendered = rendered
+            all_moved_provs.update(provs)
+        self._fast_update_provinces(all_moved_provs, new_tag)
         self._selected = {(state, new_tag) for (state, _) in self._selected}
         self._refresh_ui()
         self._save_status.config(text=f"{len(self._selected)} sous-etat(s) modifie(s) (non sauvegarde)")
@@ -626,10 +670,23 @@ class MapFrame(ttk.Frame):
         if n == 0:
             messagebox.showinfo("Sauvegarde", "Aucune modification a sauvegarder.")
             return
+        # Capturer AVANT _rebuild_states_file qui vide _modified_states
+        states_snapshot = set(self._modified_states)
+        substates_snapshot = {k: set(v) for k, v in self._substates.items()}
         shutil.copy(states_path, states_path + ".backup")
         self._rebuild_states_file(states_path)
+        # Mettre à jour pops et buildings proportionnellement
+        try:
+            updated_files = update_history_files(mod, states_snapshot, substates_snapshot)
+        except Exception as e:
+            import traceback
+            messagebox.showerror("Erreur pops/buildings", traceback.format_exc())
+            updated_files = 0
         self._save_status.config(text=f"{n} state(s) sauvegarde(s) !")
-        messagebox.showinfo("Sauvegarde", f"{n} state(s) modifie(s) réécrits\n(backup cree)")
+        detail = f"{n} state(s) réécrits dans 00_states.txt"
+        if updated_files > 0:
+            detail += f"\n{updated_files} fichier(s) pops/buildings mis à jour"
+        messagebox.showinfo("Sauvegarde", detail + "\n(backups créés)")
 
     def _rebuild_states_file(self, states_path):
         with open(states_path, "r", encoding="utf-8-sig") as fh:
