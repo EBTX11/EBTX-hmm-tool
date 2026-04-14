@@ -41,13 +41,31 @@ class PaysFrame(ttk.Frame):
     def __init__(self, parent, config):
         super().__init__(parent)
         self.config = config
+        self._selected_country_tag = None  # TAG du pays sélectionné
         self._build()
 
     def _build(self):
         ttk.Label(self, text="Outils Pays", font=("Segoe UI", 15, "bold")).pack(pady=(18, 5))
 
-        nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=15, pady=10)
+        # Layout principal avec panneau pays à droite
+        main = ttk.Frame(self)
+        main.pack(fill="both", expand=True)
+
+        # Panneau de gauche avec les onglets
+        left_panel = ttk.Frame(main)
+        left_panel.pack(side="left", fill="both", expand=True, padx=15, pady=10)
+
+        nb = ttk.Notebook(left_panel)
+        nb.pack(fill="both", expand=True)
+
+        self._tab_creer(nb)
+        self._tab_modifier(nb)
+        self._tab_dyn_name(nb)
+        self._tab_historique(nb)
+        self._tab_tech(nb)
+
+        # Panneau de droite avec la liste des pays
+        self._build_country_sidebar(main)
 
         self._tab_creer(nb)
         self._tab_modifier(nb)
@@ -56,10 +74,114 @@ class PaysFrame(ttk.Frame):
         self._tab_tech(nb)
 
     # ----------------------------------------------------------
-    # TAB 1 : CREER UN PAYS
-    # ----------------------------------------------------------
+        # PANNEAU LATÉRAL DROIT - LISTE DES PAYS
+        # ----------------------------------------------------------
 
-    def _tab_creer(self, nb):
+        def _build_country_sidebar(self, parent):
+            """Construit le panneau latéral avec la liste des pays."""
+            sidebar = ttk.LabelFrame(parent, text="Pays du mod")
+            sidebar.pack(side="right", fill="y", padx=(0, 15), pady=10, padright=15)
+
+            # Zone de recherche
+            search_frame = ttk.Frame(sidebar)
+            search_frame.pack(fill="x", padx=5, pady=5)
+            ttk.Label(search_frame, text="Rechercher:", font=("Segoe UI", 8)).pack(anchor="w")
+            self._country_search_var = tk.StringVar()
+            self._country_search_var.trace("w", self._filter_country_list)
+            ttk.Entry(search_frame, textvariable=self._country_search_var, width=20).pack(fill="x", pady=2)
+
+            # Liste des pays avec scrollbar
+            list_frame = ttk.Frame(sidebar)
+            list_frame.pack(fill="both", expand=True, padx=5, pady=5)
+
+            self._country_listbox = tk.Listbox(list_frame, height=25, font=("Segoe UI", 9))
+            self._country_listbox.pack(side="left", fill="both", expand=True)
+            scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self._country_listbox.yview)
+            scrollbar.pack(side="right", fill="y")
+            self._country_listbox.configure(yscrollcommand=scrollbar.set)
+
+            self._country_listbox.bind("<<ListboxSelect>>", self._on_country_select)
+
+            # Bouton pour charger/mettre à jour la liste
+            ttk.Button(sidebar, text="Charger les pays", command=self._load_country_list).pack(pady=5)
+
+        def _load_country_list(self):
+            """Charge la liste des pays depuis common/history/countries/"""
+            mod = self.config.mod_path
+            if not mod:
+                messagebox.showerror("Erreur", "Configure le dossier mod d'abord")
+                return
+
+            countries_dir = os.path.join(mod, "common", "history", "countries")
+            if not os.path.exists(countries_dir):
+                messagebox.showerror("Erreur", "Dossier countries introuvable")
+                return
+
+            self._countries = []  # Liste (tag, nom)
+            for fname in sorted(os.listdir(countries_dir)):
+                if not fname.endswith(".txt"):
+                    continue
+                # Format: "TAG - Nom du pays.txt"
+                if " - " in fname:
+                    parts = fname.split(" - ")
+                    tag = parts[0].strip()
+                    # Enlever l'extension .txt
+                    name = " - ".join(parts[1:]).replace(".txt", "")
+                    self._countries.append((tag, name))
+
+            # Trier alphabétiquement par nom
+            self._countries.sort(key=lambda x: x[1].lower())
+
+            self._update_country_listbox()
+            messagebox.showinfo("OK", f"{len(self._countries)} pays chargés")
+
+        def _update_country_listbox(self):
+            """Met à jour la liste des pays en fonction du filtre de recherche."""
+            self._country_listbox.delete(0, tk.END)
+            search = self._country_search_var.get().lower()
+
+            for tag, name in self._countries:
+                if search in name.lower() or search in tag.lower():
+                    self._country_listbox.insert(tk.END, f"{name} ({tag})")
+
+        def _filter_country_list(self, *args):
+            """Filtre la liste lors de la recherche."""
+            self._update_country_listbox()
+
+        def _on_country_select(self, event):
+            """Action lors de la sélection d'un pays."""
+            selection = self._country_listbox.curselection()
+            if not selection:
+                return
+
+            # Récupérer le tag depuis la sélection
+            selected_text = self._country_listbox.get(selection[0])
+            # Format: "Nom du pays (TAG)"
+            import re
+            match = re.search(r'\(([A-Z]{3})\)', selected_text)
+            if match:
+                self._selected_country_tag = match.group(1)
+                # Remplir automatiquement le champ TAG dans les onglets
+                self._fill_tag_in_tabs(self._selected_country_tag)
+                messagebox.showinfo("Pays sélectionné", f"TAG: {self._selected_country_tag}")
+
+        def _fill_tag_in_tabs(self, tag):
+            """Remplit automatiquement les champs TAG dans les différents onglets."""
+            # Remplir dans l'onglet Modifier lois
+            if hasattr(self, '_mod_tag'):
+                self._mod_tag.set(tag)
+            # Remplir dans l'onglet Nom dynamique
+            if hasattr(self, '_dyn_tag'):
+                self._dyn_tag.set(tag)
+            # Remplir dans l'onglet Historique
+            if hasattr(self, '_hist_tag'):
+                self._hist_tag.set(tag)
+
+    # ----------------------------------------------------------
+        # TAB 1 : CREER UN PAYS
+        # ----------------------------------------------------------
+
+        def _tab_creer(self, nb):
         f = ttk.Frame(nb)
         nb.add(f, text="  Creer pays  ")
 
