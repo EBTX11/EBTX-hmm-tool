@@ -1,0 +1,199 @@
+# =========================
+# DINAR
+# =========================
+ALD=dinar_algerian_dinar
+MAS=dinar_algerian_dinar
+CON=dinar_algerian_dinar
+TUG=dinar_algerian_dinar
+AIT=dinar_algerian_dinar
+
+IRQ=dinar_iraqi_dinar
+TRI=dinar_libyan_dinar
+MOR=dinar_moroccan_dirham
+OMA=dinar_omanian_rial
+PER=dinar_qiran
+
+NEJ=dinar_saudi_riyal
+HDJ=dinar_saudi_riyal
+JAB=dinar_saudi_riyal
+
+SER=dinar_serbian_dinar
+TUN=dinar_tunisian_dinar
+YUG=dinar_yugoslav_dinar
+
+# =========================
+# DOLLAR
+# ========================= 
+AST=dollar_australian_dollar
+NSW=dollar_australian_dollar
+CAN=dollar_canadian_dollar
+QUE=dollar_canadian_dollar
+ONT=dollar_canadian_dollar
+HAI=dollar_caribbean_dollar
+CSA=dollar_confederate_states_dollar
+LIB=dollar_liberian_dollar
+
+NZL=dollar_new_zealand_dollar
+UNT=dollar_new_zealand_dollar
+
+SIL=dollar_sierra_leonean_dollar
+USA=dollar_united_states_dollar
+
+# =========================
+# ECO / AFRICA
+# =========================
+MAD=eco_ariary
+ETH=eco_ethiopian_birr
+ASH=eco_ghanaian_pound
+SOK=eco_nigerian_naira
+SAF=eco_south_african_rand
+
+# =========================
+# FRANC
+# =========================
+BEL=franc_belgian_franc
+FRA=franc_french_franc
+LUX=franc_luxembourgish_franc
+
+# =========================
+# GULDEN
+# =========================
+AUS=gulden
+BAV=gulden_bavarian_gulden
+NET=gulden_florin
+HUN=gulden_hungarian_forint
+DEI=gulden_indies_guilder
+WUR=gulden_south_german_gulde
+
+# =========================
+# KRONE
+# =========================
+CZH=krone_czech_koruna
+DEN=krone_danish_krone
+EST=krone_estonian_kroon
+ICL=krone_icelandic_krona
+NOR=krone_norwegian_krone
+SLV=krone_slovak_koruna
+SWE=krone_swedish_krona
+SCA=krone_swedish_krona
+
+# =========================
+# LEU / LEV
+# =========================
+ROM=leon_leu
+MOL=leon_leu
+WAL=leon_leu
+BUL=leon_lev
+
+# =========================
+# LIRA
+# =========================
+ITA=lira
+SIC=lira_ducato
+TUR=lira_ottoman_lira
+PAP=lira_scudo_pontificio
+SAR=lira_scudo_sardo
+
+PAR=lira_toscane_lira
+MOD=lira_toscane_lira
+LUC=lira_toscane_lira
+TUS=lira_toscane_lira
+
+# =========================
+# MARK
+# =========================
+GER=mark
+HRE=mark
+FIN=mark_finnish_markka
+
+# =========================
+# PESO
+# =========================
+ARG=peso_argentine_peso
+BOL=peso_bolivien_peso
+PBC=peso_bolivien_peso
+
+CHL=peso_chilean_peso
+CLM=peso_colombian_peso
+COS=peso_costa_rican_colon
+CUB=peso_cuban_peso
+ECU=peso_ecuadorian_peso
+ELS=peso_el_salvador_colon
+GUA=peso_guatemalan_quetzal
+HON=peso_honduran_lempira
+MEX=peso_mexican_peso 
+NIC=peso_nicaraguan_cordoba
+PRG=peso_paraguayan_peso
+PHI=peso_philippine_peso
+
+PEU=peso_sol_de_oro
+NPU=peso_sol_de_oro
+SPU=peso_sol_de_oro
+
+URU=peso_uruguayan_peso
+VNZ=peso_venezuelan_peso
+
+# =========================
+# POUND
+# =========================
+EGY=pound_egyptian_pound
+GBR=pound_sterling
+
+# =========================
+# REAL
+# =========================
+POR=real
+BRZ=real_brazilian_real
+
+# =========================
+# RUPEE / ASIA
+# =========================
+BIC=rupee_indian_rupee
+SIA=spe_baht
+DAI=spe_dong
+
+GRE=spe_drachma
+BYZ=spe_drachma
+
+KOR=spe_korean_won
+
+LAT=spe_latvian_lats
+UBD=spe_latvian_lats
+
+LIT=spe_lithuanian_litas
+SPA=spe_peseta
+JAP=spe_yen
+
+CHI=spe_yuan
+Y44=spe_yuan
+TPG=spe_yuan
+MGL=spe_yuan
+TIB=spe_yuan
+BHU=spe_yuan
+SIK=spe_yuan
+
+POL=spe_zloti
+
+# =========================
+# THALER
+# =========================
+HAN=thaler_hannoveraner_thaler
+PRU=thaler_prussian_thaler
+NGF=thaler_prussian_thaler
+SAX=thaler_saxon_thaler
+
+
+# =========================
+# AUTRE
+# =========================
+# Suisse
+SWI=franc_swiss_franc
+
+# Irlande
+IRE=pound_irish_pound
+
+# Indonésie / Malaisie zone
+DEI=rupee_indonesian_rupiah
+
+# Russie / espace russe
+RUS=spe_ruble
