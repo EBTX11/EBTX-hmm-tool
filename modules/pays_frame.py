@@ -182,23 +182,17 @@ class PaysFrame(ttk.Frame):
         outer.pack(fill="both", expand=True, padx=10, pady=5)
 
         hmm_frame = ttk.LabelFrame(outer, text="Technologie HMM")
-        hmm_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        hmm_frame.pack(side="left", fill="both", expand=True, padx=(0, 5), ipadx=0)
 
         regular_frame = ttk.LabelFrame(outer, text="Technologie Standard")
-        regular_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
+        regular_frame.pack(side="right", fill="both", expand=True, padx=(5, 0), ipadx=0)
 
-        self._hmm_canvas = tk.Canvas(hmm_frame)
-        self._hmm_scrollbar = ttk.Scrollbar(hmm_frame, orient="vertical", command=self._hmm_canvas.yview)
-        self._hmm_sections_frame = ttk.Frame(self._hmm_canvas)
-        self._hmm_sections_frame.bind(
-            "<Configure>",
-            lambda e: self._hmm_canvas.configure(scrollregion=self._hmm_canvas.bbox("all"))
-        )
-        self._hmm_canvas_window = self._hmm_canvas.create_window((0, 0), window=self._hmm_sections_frame, anchor="nw")
-        self._hmm_canvas.configure(yscrollcommand=self._hmm_scrollbar.set)
-        self._hmm_canvas.bind("<Configure>", lambda e: self._hmm_canvas.itemconfig(self._hmm_canvas_window, width=e.width))
-        self._hmm_scrollbar.pack(side="right", fill="y")
-        self._hmm_canvas.pack(side="left", fill="both", expand=True)
+        outer.columnconfigure(0, weight=1, uniform="tech_columns")
+        outer.columnconfigure(1, weight=1, uniform="tech_columns")
+
+        self._hmm_sections_frame = ttk.Frame(hmm_frame)
+        self._hmm_sections_frame.pack(fill="both", expand=True)
+        hmm_frame.pack_propagate(False)
 
         tiers_hmm = [
             "effect_starting_technology_tier_1_tech_hmm",
@@ -215,18 +209,9 @@ class PaysFrame(ttk.Frame):
             txt.pack(fill="x", padx=5, pady=(0, 5))
             self._hmm_text_areas[tier] = txt
 
-        self._regular_canvas = tk.Canvas(regular_frame)
-        self._regular_scrollbar = ttk.Scrollbar(regular_frame, orient="vertical", command=self._regular_canvas.yview)
-        self._regular_sections_frame = ttk.Frame(self._regular_canvas)
-        self._regular_sections_frame.bind(
-            "<Configure>",
-            lambda e: self._regular_canvas.configure(scrollregion=self._regular_canvas.bbox("all"))
-        )
-        self._regular_canvas_window = self._regular_canvas.create_window((0, 0), window=self._regular_sections_frame, anchor="nw")
-        self._regular_canvas.configure(yscrollcommand=self._regular_scrollbar.set)
-        self._regular_canvas.bind("<Configure>", lambda e: self._regular_canvas.itemconfig(self._regular_canvas_window, width=e.width))
-        self._regular_scrollbar.pack(side="right", fill="y")
-        self._regular_canvas.pack(side="left", fill="both", expand=True)
+        self._regular_sections_frame = ttk.Frame(regular_frame)
+        self._regular_sections_frame.pack(fill="both", expand=True)
+        regular_frame.pack_propagate(False)
 
         tiers_std = [
             "effect_starting_technology_tier_1_tech",
