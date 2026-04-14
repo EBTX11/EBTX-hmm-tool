@@ -1,9 +1,7 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, messagebox
 import os
 import re
-import random
-
 from modules.tech_frame import TechFrame
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
@@ -42,25 +40,22 @@ class PaysFrame(ttk.Frame):
         main = ttk.Frame(self)
         main.pack(fill="both", expand=True)
 
-        left_panel = ttk.Frame(main)
-        left_panel.pack(side="left", fill="both", expand=True, padx=15, pady=10)
-
-        nb = ttk.Notebook(left_panel)
-        nb.pack(fill="both", expand=True)
-
-        self._tab_creer(nb)
-        self._tab_modifier(nb)
-        self._tab_dyn_name(nb)
-        self._tab_historique(nb)
-        self._tab_tech(nb)
-
         self._build_country_sidebar(main)
 
+        right_panel = ttk.Frame(main)
+        right_panel.pack(side="right", fill="both", expand=True, padx=15, pady=10)
+
+        nb = ttk.Notebook(right_panel)
+        nb.pack(fill="both", expand=True)
+
+        self._tab_generale(nb)
+        self._tab_lois(nb)
+        self._tab_tech(nb)
     # ---------------- SIDEBAR ----------------
 
     def _build_country_sidebar(self, parent):
         sidebar = ttk.LabelFrame(parent, text="Pays du mod")
-        sidebar.pack(side="right", fill="y", padx=(0, 15), pady=10)
+        sidebar.pack(side="left", fill="y", padx=(15, 0), pady=10)
 
         search_frame = ttk.Frame(sidebar)
         search_frame.pack(fill="x", padx=5, pady=5)
@@ -136,24 +131,19 @@ class PaysFrame(ttk.Frame):
 
     # ---------------- TABS ----------------
 
-    def _tab_creer(self, nb):
+    def _tab_generale(self, nb):
         f = ttk.Frame(nb)
-        nb.add(f, text="Creer pays")
+        nb.add(f, text="Generale")
 
-        ttk.Label(f, text="Creation simple").pack(pady=10)
+        ttk.Label(f, text="Informations generales du pays").pack(pady=10)
 
-    def _tab_modifier(self, nb):
+    def _tab_lois(self, nb):
         f = ttk.Frame(nb)
-        nb.add(f, text="Modifier lois")
+        nb.add(f, text="Lois")
 
-    def _tab_dyn_name(self, nb):
-        f = ttk.Frame(nb)
-        nb.add(f, text="Nom dynamique")
-
-    def _tab_historique(self, nb):
-        f = ttk.Frame(nb)
-        nb.add(f, text="Historique")
+        ttk.Label(f, text="Gestion des lois").pack(pady=10)
 
     def _tab_tech(self, nb):
         f = TechFrame(nb, self.config)
         nb.add(f, text="Technologie")
+
