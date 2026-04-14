@@ -215,6 +215,7 @@ class MapFrame(ttk.Frame):
         self._prov_selected = set()
         self._loading = False
         self._mode = MODE_STATE
+        self._modified_states = set()
         self._build()
 
     def _build(self):
@@ -461,6 +462,7 @@ class MapFrame(ttk.Frame):
                 if new_tag and len(new_tag) >= 2:
                     old_tag = tag
                     if old_tag != new_tag:
+                        self._modified_states.add(state)
                         for p in self._substates.get((state, tag), set()):
                             self._prov_owner_map[p] = new_tag
                         provs = self._substates.pop((state, tag), set())
@@ -480,6 +482,7 @@ class MapFrame(ttk.Frame):
                 if new_tag and len(new_tag) >= 2:
                     old_tag = self._prov_owner_map.get(prov_hex)
                     if old_tag != new_tag:
+                        self._modified_states.add(state)
                         self._prov_owner_map[prov_hex] = new_tag
                         if (state, old_tag) in self._substates:
                             self._substates[(state, old_tag)].discard(prov_hex)
@@ -575,6 +578,7 @@ class MapFrame(ttk.Frame):
             messagebox.showwarning("Attention", "Selectionne d'abord des sous-etats")
             return
         for (state, old_tag) in list(self._selected):
+            self._modified_states.add(state)
             for prov_hex in self._substates.get((state, old_tag), set()):
                 self._prov_owner_map[prov_hex] = new_tag
             provs = self._substates.pop((state, old_tag), set())
@@ -598,6 +602,7 @@ class MapFrame(ttk.Frame):
             state = self._prov_to_state.get(prov_hex)
             if not state or not old_tag:
                 continue
+            self._modified_states.add(state)
             self._prov_owner_map[prov_hex] = new_tag
             if (state, old_tag) in self._substates:
                 self._substates[(state, old_tag)].discard(prov_hex)
@@ -617,10 +622,14 @@ class MapFrame(ttk.Frame):
         if not os.path.exists(states_path):
             messagebox.showerror("Erreur", f"Fichier introuvable:\n{states_path}")
             return
+        n = len(self._modified_states)
+        if n == 0:
+            messagebox.showinfo("Sauvegarde", "Aucune modification a sauvegarder.")
+            return
         shutil.copy(states_path, states_path + ".backup")
         self._rebuild_states_file(states_path)
-        self._save_status.config(text="Sauvegarde complete !")
-        messagebox.showinfo("Sauvegarde", "00_states.txt ecrit completement\n(backup cree)")
+        self._save_status.config(text=f"{n} state(s) sauvegarde(s) !")
+        messagebox.showinfo("Sauvegarde", f"{n} state(s) modifie(s) réécrits\n(backup cree)")
 
     def _rebuild_states_file(self, states_path):
         with open(states_path, "r", encoding="utf-8-sig") as fh:
@@ -634,26 +643,34 @@ class MapFrame(ttk.Frame):
                 start_of_state = i + sm.start()
                 block_start = i + sm.end()
 
-                # Détecter l'indentation du bloc s:STATE (ex: "    " si dans STATES = { })
-                before = content[i:start_of_state]
-                last_nl = before.rfind('\n')
-                indent = before[last_nl + 1:] if last_nl >= 0 else ''
-
+                # Trouver la fin du bloc
                 depth, j = 1, block_start
                 while j < len(content) and depth > 0:
                     if content[j] == "{": depth += 1
                     elif content[j] == "}": depth -= 1
                     j += 1
-                state_block = content[block_start:j - 1]
-                new_state = self._build_state_block(state_name, state_block, indent)
-                new_content.append(content[i:start_of_state])
-                new_content.append(new_state)
+
+                if state_name in self._modified_states:
+                    # Détecter l'indentation réelle du s:STATE dans le fichier
+                    before = content[i:start_of_state]
+                    last_nl = before.rfind('\n')
+                    indent = before[last_nl + 1:] if last_nl >= 0 else ''
+
+                    state_block = content[block_start:j - 1]
+                    new_state = self._build_state_block(state_name, state_block, indent)
+                    new_content.append(content[i:start_of_state])
+                    new_content.append(new_state)
+                else:
+                    # State non modifié : conserver le bloc original tel quel
+                    new_content.append(content[i:j])
+
                 i = j
             else:
                 new_content.append(content[i:])
                 break
         with open(states_path, "w", encoding="utf-8-sig") as fh:
             fh.write("".join(new_content))
+        self._modified_states.clear()
 
     def _build_state_block(self, state_name, original_block, indent=""):
         # Retirer les create_state existants, garder le reste (add_claim, add_homeland, etc.)
@@ -693,4 +710,4 @@ class MapFrame(ttk.Frame):
                     lines.append("")
 
         lines.append(f"{indent}}}")
-        return "\n".join(lines) + "\n"
+        return "\n".join(lines)
