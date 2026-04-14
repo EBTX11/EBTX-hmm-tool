@@ -152,21 +152,12 @@ class PaysFrame(ttk.Frame):
         f = ttk.Frame(nb)
         nb.add(f, text="Technologie générale")
 
-        btn_frame = ttk.Frame(f)
-        btn_frame.pack(fill="x", padx=10, pady=5)
-        ttk.Button(btn_frame, text="Charger 00_major_tags.txt", command=self._load_major_tags).pack(side="left", padx=5)
-        ttk.Button(btn_frame, text="Sauvegarder", command=self._save_major_tags).pack(side="left", padx=5)
-        self._major_tags_status = ttk.Label(btn_frame, text="")
-        self._major_tags_status.pack(side="left", padx=10)
-
         base_frame = ttk.LabelFrame(f, text="Défaut (BASE:)")
         base_frame.pack(fill="x", padx=10, pady=(5, 10))
 
         base_content = ttk.Frame(base_frame)
         base_content.pack(fill="x", padx=5, pady=5)
 
-        self._effect_combo = ttk.Combobox(base_content, width=30, state="readonly")
-        self._effect_combo.pack(side="left", padx=5)
         self._effect_combo_items = [
             "effect_starting_technology_tier_1_tech_hmm",
             "effect_starting_technology_tier_2_tech_hmm",
@@ -179,8 +170,13 @@ class PaysFrame(ttk.Frame):
             "effect_starting_technology_tier_5_tech",
             "effect_starting_technology_tier_6_tech",
         ]
-        self._effect_combo['values'] = self._effect_combo_items
 
+        self._effect_combo = ttk.Combobox(base_content, width=50, state="readonly", values=self._effect_combo_items)
+        self._effect_combo.pack(side="left", fill="x", expand=True, padx=5, pady=5)
+        self._effect_combo.current(0)
+
+        self._execute_button = ttk.Button(base_content, text="Exécuter", command=self._execute_tech_update)
+        self._execute_button.pack(side="left", padx=5, pady=5)
 
         outer = ttk.Frame(f)
         outer.pack(fill="both", expand=True, padx=10, pady=5)
@@ -204,6 +200,21 @@ class PaysFrame(ttk.Frame):
         self._hmm_scrollbar.pack(side="right", fill="y")
         self._hmm_canvas.pack(side="left", fill="both", expand=True)
 
+        tiers_hmm = [
+            "effect_starting_technology_tier_1_tech_hmm",
+            "effect_starting_technology_tier_2_tech_hmm",
+            "effect_starting_technology_tier_3_tech_hmm",
+            "effect_starting_technology_tier_4_tech_hmm",
+        ]
+
+        self._hmm_text_areas = {}
+        for tier in tiers_hmm:
+            label = ttk.Label(self._hmm_sections_frame, text=f"# {tier}")
+            label.pack(anchor="w", padx=5, pady=(5, 0))
+            txt = tk.Text(self._hmm_sections_frame, height=4, font=("Consolas", 9), wrap="word")
+            txt.pack(fill="x", padx=5, pady=(0, 5))
+            self._hmm_text_areas[tier] = txt
+
         self._regular_canvas = tk.Canvas(regular_frame)
         self._regular_scrollbar = ttk.Scrollbar(regular_frame, orient="vertical", command=self._regular_canvas.yview)
         self._regular_sections_frame = ttk.Frame(self._regular_canvas)
@@ -217,137 +228,114 @@ class PaysFrame(ttk.Frame):
         self._regular_scrollbar.pack(side="right", fill="y")
         self._regular_canvas.pack(side="left", fill="both", expand=True)
 
-        self._hmm_section_data = []
-        self._regular_section_data = []
-        self._major_tags_filepath = None
+        tiers_std = [
+            "effect_starting_technology_tier_1_tech",
+            "effect_starting_technology_tier_2_tech",
+            "effect_starting_technology_tier_3_tech",
+            "effect_starting_technology_tier_4_tech",
+            "effect_starting_technology_tier_5_tech",
+            "effect_starting_technology_tier_6_tech",
+        ]
 
-    def _load_major_tags(self):
-        mod = self.config.mod_path
-        if not mod:
+        self._std_text_areas = {}
+        for tier in tiers_std:
+            label = ttk.Label(self._regular_sections_frame, text=f"# {tier}")
+            label.pack(anchor="w", padx=5, pady=(5, 0))
+            txt = tk.Text(self._regular_sections_frame, height=4, font=("Consolas", 9), wrap="word")
+            txt.pack(fill="x", padx=5, pady=(0, 5))
+            self._std_text_areas[tier] = txt
+
+    def _execute_tech_update(self):
+        mod_path = self.config.mod_path
+        if not mod_path:
             messagebox.showerror("Erreur", "Configure le dossier mod d'abord")
             return
 
-        filepath = os.path.join(mod, "common", "history", "countries", "00_major_tags.txt")
-        if not os.path.exists(filepath):
-            messagebox.showerror("Erreur", f"Fichier introuvable:\n{filepath}")
+        countries_folder = os.path.join(mod_path, "common", "history", "countries")
+        if not os.path.exists(countries_folder):
+            messagebox.showerror("Erreur", "Dossier countries introuvable")
             return
 
-        for widget in self._hmm_sections_frame.winfo_children():
-            widget.destroy()
-        for widget in self._regular_sections_frame.winfo_children():
-            widget.destroy()
-        self._hmm_section_data = []
-        self._regular_section_data = []
-
-        sections = []
-        current_header = None
-        current_tags = []
-        base_line = ""
-
-        with open(filepath, "r", encoding="utf-8") as fh:
-            for line in fh:
-                raw = line.strip()
-                if not raw:
-                    continue
-                if raw.upper().startswith("BASE:"):
-                    base_line = raw.split("BASE:", 1)[1].strip()
-                    continue
-                if raw.startswith("#"):
-                    if current_header is not None:
-                        sections.append((current_header, list(current_tags)))
-                    current_header = raw
-                    current_tags = []
-                    continue
-                current_tags.append(raw)
-
-        if current_header is not None:
-            sections.append((current_header, list(current_tags)))
-
-        self._base_var.set(base_line)
-        self._major_tags_filepath = filepath
-
-        def header_to_effect(header):
-            upper = header.upper()
-            tier_match = re.search(r'TIER_(\d)', upper)
-            tier = tier_match.group(1) if tier_match else "?"
-            if "_TECH_HMM" in upper:
-                return f"effect_starting_technology_tier_{tier}_tech_hmm = yes"
-            elif "_TECH" in upper:
-                return f"effect_starting_technology_tier_{tier}_tech = yes"
-            return header.lstrip("# ")
-
-        def is_hmm(effect):
-            return "_tech_hmm" in effect.lower()
-
-        hmm_count = 0
-        regular_count = 0
-
-        for header, tags in sections:
-            effect = header_to_effect(header)
-            is_hmm_effect = is_hmm(effect)
-
-            if is_hmm_effect:
-                parent_frame = self._hmm_sections_frame
-                lf = ttk.LabelFrame(parent_frame, text=effect)
-                lf.pack(fill="x", padx=5, pady=3)
-
-                txt = tk.Text(lf, height=4, font=("Consolas", 9), wrap="word")
-                txt.pack(fill="both", expand=True, padx=5, pady=3)
-                txt.insert("1.0", "\n".join(tags))
-
-                self._hmm_section_data.append((header, effect, txt))
-                hmm_count += 1
-            else:
-                parent_frame = self._regular_sections_frame
-
-                txt = tk.Text(parent_frame, height=4, font=("Consolas", 9), wrap="word")
-                txt.pack(fill="x", padx=5, pady=(3, 0))
-                txt.insert("1.0", "\n".join(tags))
-
-                lf = ttk.LabelFrame(parent_frame, text=effect)
-                lf.pack(fill="x", padx=5, pady=(0, 3))
-                lf.pack_forget()
-
-                self._regular_section_data.append((header, effect, txt, lf))
-                regular_count += 1
-
-        for header, effect, txt, lf in self._regular_section_data:
-            lf.pack(fill="x", padx=5, pady=(3, 0))
-
-        self._major_tags_status.config(text=f"HMM: {hmm_count}, Std: {regular_count}")
-
-    def _save_major_tags(self):
-        if not self._major_tags_filepath or (not self._hmm_section_data and not self._regular_section_data):
-            messagebox.showerror("Erreur", "Chargez d'abord le fichier")
+        base_effect = self._effect_combo.get().strip()
+        if not base_effect:
+            messagebox.showerror("Erreur", "Sélectionne un effet de base dans le menu déroulant")
             return
 
-        lines = []
-        base = self._base_var.get().strip()
-        if base:
-            lines.append(f"BASE: {base}")
-            lines.append("")
+        hmm_tags = {}
+        std_tags = {}
 
-        for header, effect, txt in self._hmm_section_data:
-            lines.append(header)
-            content = txt.get("1.0", "end").strip()
-            for tag in content.split("\n"):
-                tag = tag.strip()
-                if tag:
-                    lines.append(tag)
-            lines.append("")
+        for tier in range(1, 5):
+            key = f"effect_starting_technology_tier_{tier}_tech_hmm"
+            text_widget = self._hmm_text_areas.get(key)
+            if text_widget:
+                tags_text = text_widget.get("1.0", "end").strip().upper()
+                tags = set(line.strip() for line in tags_text.splitlines() if line.strip())
+                hmm_tags[key] = tags
 
-        for header, effect, txt, lf in self._regular_section_data:
-            lines.append(header)
-            content = txt.get("1.0", "end").strip()
-            for tag in content.split("\n"):
-                tag = tag.strip()
-                if tag:
-                    lines.append(tag)
-            lines.append("")
+        for tier in range(1, 7):
+            key = f"effect_starting_technology_tier_{tier}_tech"
+            text_widget = self._std_text_areas.get(key)
+            if text_widget:
+                tags_text = text_widget.get("1.0", "end").strip().upper()
+                tags = set(line.strip() for line in tags_text.splitlines() if line.strip())
+                std_tags[key] = tags
 
-        with open(self._major_tags_filepath, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(lines))
+        def process_file(filepath):
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = f.read()
 
-        self._major_tags_status.config(text="Sauvegardé !")
-        messagebox.showinfo("OK", "00_major_tags.txt sauvegardé")
+            original = content
 
+            match = re.search(r'c:\s*([A-Z]{3}|Y\d{2})\s*\??\s*=\s*{', content)
+            if not match:
+                return 0
+
+            tag = match.group(1).upper()
+
+            content = re.sub(r'effect_starting_technology_[^\n]+', '', content)
+            content = re.sub(r'\n\s*\n+', '\n', content)
+
+            effect_line = None
+
+            for effect, tags_set in hmm_tags.items():
+                if tag in tags_set:
+                    effect_line = effect + " = yes"
+                    break
+
+            if not effect_line:
+                for effect, tags_set in std_tags.items():
+                    if tag in tags_set:
+                        effect_line = effect + " = yes"
+                        break
+
+            if not effect_line:
+                effect_line = base_effect + " = yes"
+
+            content = re.sub(
+                r'(c:\s*(?:[A-Z]{3}|Y\d{2})\s*\??\s*=\s*{)',
+                r'\1\n        ' + effect_line,
+                content,
+                count=1
+            )
+
+            if content != original:
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(content)
+                print(f"✔ {tag} → {effect_line}")
+                return 1
+
+            return 0
+
+        files = 0
+        modified = 0
+        for filename in os.listdir(countries_folder):
+            if filename.endswith(".txt"):
+                files += 1
+                modified += process_file(os.path.join(countries_folder, filename))
+
+        messagebox.showinfo("Terminé", f"Fichiers lus : {files}\nModifiés : {modified}")
+
+        print("———————")
+        print(f"Fichiers lus : {files}")
+        print(f"Modifiés : {modified}")
+        print("Script terminé")
