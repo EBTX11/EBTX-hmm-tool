@@ -140,6 +140,39 @@ def _random_country_color(tag):
     return (80 + h[0] % 150, 80 + h[1] % 150, 80 + h[2] % 150)
 
 
+def parse_homelands_claims(states_path):
+    """Parse add_homeland et add_claim depuis 00_states.txt."""
+    result = {}
+    if not os.path.exists(states_path):
+        return result
+    with open(states_path, "r", encoding="utf-8-sig") as fh:
+        content = fh.read()
+    state_pat = re.compile(r's:(STATE_\w+)\s*=\s*\{')
+    i = 0
+    while i < len(content):
+        sm = state_pat.search(content, i)
+        if not sm:
+            break
+        state = sm.group(1)
+        block_start = sm.end()
+        depth, j = 1, block_start
+        while j < len(content) and depth > 0:
+            if content[j] == '{': depth += 1
+            elif content[j] == '}': depth -= 1
+            j += 1
+        block = content[block_start:j - 1]
+        homelands = []
+        claims = []
+        for hm in re.finditer(r'add_homeland\s*=\s*cu:(\w+)', block):
+            homelands.append(hm.group(1))
+        for cm in re.finditer(r'add_claim\s*=\s*c:(\w+)', block):
+            claims.append(cm.group(1))
+        if homelands or claims:
+            result[state] = {'homelands': homelands, 'claims': claims}
+        i = j
+    return result
+
+
 def build_render(provinces_arr, prov_to_state, prov_owner_map, country_colors, sea_states=None, mode="state"):
     H, W = provinces_arr.shape[:2]
     sea_states = sea_states or set()
@@ -221,6 +254,7 @@ class MapFrame(ttk.Frame):
         self._zoomed_arr = None
         self._prov_ints_zoomed = None
         self._zoom_at_cache = None
+        self._state_hc = {}
         self._build()
 
     def _build(self):
@@ -269,6 +303,34 @@ class MapFrame(ttk.Frame):
         lb_sc.pack(side="right", fill="y")
         self._sel_listbox.pack(fill="both", expand=True)
         ttk.Button(panel, text="Vider la selection", command=self._clear_selection).pack(fill="x", pady=2)
+
+        # --- HOMELAND / CLAIM ---
+        ttk.Separator(panel, orient="horizontal").pack(fill="x", pady=5)
+        ttk.Label(panel, text="Homeland:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        hf = ttk.Frame(panel)
+        hf.pack(fill="x", pady=2)
+        self._hl_labels_frame = ttk.Frame(hf)
+        self._hl_labels_frame.pack(fill="x")
+        h_add = ttk.Frame(hf)
+        h_add.pack(fill="x", pady=2)
+        self._hl_entry = tk.StringVar()
+        ttk.Entry(h_add, textvariable=self._hl_entry, width=16, font=("Consolas", 9)).pack(side="left", fill="x", expand=True)
+        ttk.Button(h_add, text="+", width=3, command=lambda: self._add_hc("homeland")).pack(side="left", padx=2)
+
+        ttk.Separator(panel, orient="horizontal").pack(fill="x", pady=3)
+        ttk.Label(panel, text="Claim:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        cf = ttk.Frame(panel)
+        cf.pack(fill="x", pady=2)
+        self._cl_labels_frame = ttk.Frame(cf)
+        self._cl_labels_frame.pack(fill="x")
+        c_add = ttk.Frame(cf)
+        c_add.pack(fill="x", pady=2)
+        self._cl_entry = tk.StringVar()
+        ttk.Entry(c_add, textvariable=self._cl_entry, width=16, font=("Consolas", 9)).pack(side="left", fill="x", expand=True)
+        ttk.Button(c_add, text="+", width=3, command=lambda: self._add_hc("claim")).pack(side="left", padx=2)
+
+        ttk.Button(panel, text="Sauver Homeland/Claim", command=self._save_hc).pack(fill="x", pady=4)
+
         ttk.Separator(panel, orient="horizontal").pack(fill="x", pady=5)
         ttk.Label(panel, text="Info province", font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self._info_label = ttk.Label(panel, text="-", font=("Consolas", 8), wraplength=220, justify="left")
@@ -378,6 +440,7 @@ class MapFrame(ttk.Frame):
             self._state_border_mask = state_border
             self._zoom_at_cache = None
             split = sum(1 for s in set(k[0] for k in substates) if len([k for k in substates if k[0] == s]) > 1)
+            self._state_hc = parse_homelands_claims(states_path) if states_path and os.path.exists(states_path) else {}
             self.after(0, self._display_map)
             self.after(0, lambda: self._status_label.config(
                 text=f"Carte chargee -- {len(prov_to_state)} provinces | "
@@ -596,6 +659,7 @@ class MapFrame(ttk.Frame):
             self._info_label.config(
                 text=f"Province : {last_prov}\nEtat     : {last_state}\nPays     : {last_tag or '?'}{split_info}"
             )
+            self._refresh_hc_ui(last_state)
         elif last_prov:
             tag = self._prov_owner_map.get(last_prov, "?")
             state = self._prov_to_state.get(last_prov, "?")
@@ -607,7 +671,120 @@ class MapFrame(ttk.Frame):
         self._prov_selected.clear()
         self._sel_listbox.delete(0, "end")
         self._info_label.config(text="-")
+        self._refresh_hc_ui(None)
         self._display_map()
+
+    def _refresh_hc_ui(self, state_name):
+        """Met a jour l'affichage homelands/claims pour l'etat selectionne."""
+        for w in self._hl_labels_frame.winfo_children():
+            w.destroy()
+        for w in self._cl_labels_frame.winfo_children():
+            w.destroy()
+        if not state_name:
+            return
+        data = self._state_hc.get(state_name, {})
+        homelands = data.get('homelands', [])
+        claims = data.get('claims', [])
+        for hl in homelands:
+            self._make_hc_label(self._hl_labels_frame, hl, lambda x=hl: self._remove_hc("homeland", x))
+        for cl in claims:
+            self._make_hc_label(self._cl_labels_frame, cl, lambda x=cl: self._remove_hc("claim", x))
+
+    def _make_hc_label(self, parent, text, remove_cmd):
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=1)
+        ttk.Label(row, text=text, font=("Consolas", 8)).pack(side="left")
+        ttk.Button(row, text="X", width=2, command=remove_cmd).pack(side="right")
+
+    def _remove_hc(self, kind, value):
+        state = self._get_selected_state()
+        if not state:
+            return
+        key = 'homelands' if kind == 'homeland' else 'claims'
+        data = self._state_hc.setdefault(state, {'homelands': [], 'claims': []})
+        if value in data[key]:
+            data[key].remove(value)
+        self._refresh_hc_ui(state)
+
+    def _add_hc(self, kind):
+        state = self._get_selected_state()
+        if not state:
+            messagebox.showwarning("Attention", "Selectionne d'abord un etat")
+            return
+        entry = self._hl_entry if kind == 'homeland' else self._cl_entry
+        value = entry.get().strip().lower()
+        if not value:
+            return
+        key = 'homelands' if kind == 'homeland' else 'claims'
+        data = self._state_hc.setdefault(state, {'homelands': [], 'claims': []})
+        if value not in data[key]:
+            data[key].append(value)
+        entry.set("")
+        self._refresh_hc_ui(state)
+
+    def _get_selected_state(self):
+        """Recupere le nom de l'etat courant (dernier clique)."""
+        if self._selected:
+            return next(iter(self._selected))[0]
+        if self._prov_selected:
+            p = next(iter(self._prov_selected))
+            return self._prov_to_state.get(p)
+        return None
+
+    def _save_hc(self):
+        """Sauvegarde les homelands/claims pour l'etat selectionne uniquement."""
+        state = self._get_selected_state()
+        if not state:
+            messagebox.showwarning("Attention", "Selectionne d'abord un etat")
+            return
+        mod = self.config.mod_path
+        if not mod:
+            messagebox.showerror("Erreur", "Configure le dossier mod d'abord (Config)")
+            return
+        states_path = os.path.join(mod, "common/history/states/00_states.txt")
+        if not os.path.exists(states_path):
+            messagebox.showerror("Erreur", f"Fichier introuvable:\n{states_path}")
+            return
+        shutil.copy(states_path, states_path + ".backup")
+        self._update_hc_in_file(states_path, state)
+        self._hl_entry.set("")
+        self._cl_entry.set("")
+        messagebox.showinfo("Sauvegarde", f"Homeland/Claim sauvegardes pour {state}")
+
+    def _update_hc_in_file(self, states_path, state_name):
+        with open(states_path, "r", encoding="utf-8-sig") as fh:
+            content = fh.read()
+        state_pat = re.compile(rf's:{re.escape(state_name)}\s*=\s*\{{')
+        sm = state_pat.search(content)
+        if not sm:
+            messagebox.showerror("Erreur", f"Etat {state_name} non trouve dans le fichier")
+            return
+        block_start = sm.end()
+        before = content[:sm.start()]
+        last_nl = before.rfind('\n')
+        indent = before[last_nl + 1:] if last_nl >= 0 else ''
+        depth, i = 1, block_start
+        while i < len(content) and depth > 0:
+            if content[i] == '{': depth += 1
+            elif content[i] == '}': depth -= 1
+            i += 1
+        block_end = i - 1
+        old_block = content[block_start:block_end]
+        cleaned = re.sub(r'\s*add_homeland\s*=\s*cu:\w+\s*', '', old_block)
+        cleaned = re.sub(r'\s*add_claim\s*=\s*c:\w+\s*', '', cleaned)
+        cleaned = cleaned.rstrip()
+        data = self._state_hc.get(state_name, {'homelands': [], 'claims': []})
+        new_lines = []
+        for hl in data.get('homelands', []):
+            new_lines.append(f"{indent}    add_homeland = cu:{hl}")
+        for cl in data.get('claims', []):
+            new_lines.append(f"{indent}    add_claim = c:{cl}")
+        new_block = cleaned
+        if new_lines:
+            new_block = cleaned + '\n' + '\n'.join(new_lines)
+        new_content = content[:sm.start()] + f"s:{state_name} = {{\n" + new_block + '\n' + indent + '}' + content[i:]
+        with open(states_path, "w", encoding="utf-8-sig") as fh:
+            fh.write(new_content)
 
     def _transfer(self):
         new_tag = self._new_tag.get().strip().upper()
