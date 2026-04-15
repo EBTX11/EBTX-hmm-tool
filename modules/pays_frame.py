@@ -2265,9 +2265,10 @@ class PaysFrame(ttk.Frame):
 
     def _mil_load_unit_types_from_file(self, filename):
         """Parse un fichier de types d'unités et retourne {section: [unit_types]}."""
-        base = os.path.dirname(os.path.abspath(__file__))
-        data_path = os.path.normpath(os.path.join(base, "..", "data",
-                                                   "combat_unit_types", filename))
+        # Utiliser le répertoire du projet (parent de modules)
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_path = os.path.join(base, "data", "combat_unit_types", filename)
+        data_path = os.path.normpath(data_path)
         result = {}
         current_section = None
         try:
