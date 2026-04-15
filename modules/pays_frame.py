@@ -2024,11 +2024,23 @@ class PaysFrame(ttk.Frame):
 
         self._mil_tag_var      = tk.StringVar()
         self._mil_name_var     = tk.StringVar(value="First Army")
+        self._mil_sr_var       = tk.StringVar()
         self._mil_state_var    = tk.StringVar()
         self._mil_type_var     = tk.StringVar(value="army")
-        self._mil_infantry_var = tk.StringVar(value="10")
-        self._mil_artillery_var= tk.StringVar(value="0")
-        self._mil_cavalry_var  = tk.StringVar(value="0")
+        # Army composition
+        self._mil_infantry_type_var  = tk.StringVar()
+        self._mil_infantry_var       = tk.StringVar(value="10")
+        self._mil_artillery_type_var = tk.StringVar()
+        self._mil_artillery_var      = tk.StringVar(value="0")
+        self._mil_cavalry_type_var   = tk.StringVar()
+        self._mil_cavalry_var        = tk.StringVar(value="0")
+        # Navy composition
+        self._mil_light_ship_type_var   = tk.StringVar()
+        self._mil_light_ship_var        = tk.StringVar(value="0")
+        self._mil_capital_ship_type_var = tk.StringVar()
+        self._mil_capital_ship_var      = tk.StringVar(value="0")
+        self._mil_support_ship_type_var = tk.StringVar()
+        self._mil_support_ship_var      = tk.StringVar(value="0")
         self._mil_formations   = []   # liste de dicts chargés
 
         # ── Header unifié ──────────────────────────────────────
@@ -2055,33 +2067,85 @@ class PaysFrame(ttk.Frame):
         ttk.Label(row1, text="Formation Name:", anchor="w").pack(side="left")
         ttk.Entry(row1, textvariable=self._mil_name_var, width=22).pack(side="left", padx=(4, 0))
 
+        row_sr = ttk.Frame(create_lf)
+        row_sr.pack(fill="x", pady=3)
+        ttk.Label(row_sr, text="HQ Region:", width=14, anchor="w").pack(side="left")
+        sr_values = self._mil_load_strategic_regions_list()
+        self._mil_sr_combo = ttk.Combobox(row_sr, textvariable=self._mil_sr_var,
+                                          values=sr_values, width=30, state="readonly")
+        self._mil_sr_combo.pack(side="left", padx=(0, 8))
+        self._mil_sr_combo.bind("<<ComboboxSelected>>", self._mil_on_sr_selected)
+
         row2 = ttk.Frame(create_lf)
         row2.pack(fill="x", pady=3)
         ttk.Label(row2, text="Target State:", width=14, anchor="w").pack(side="left")
-        ttk.Entry(row2, textvariable=self._mil_state_var, width=18).pack(side="left", padx=(0, 8))
-        ttk.Label(row2, text="(Defaults to Capital if empty/invalid)",
-                  foreground="#888", font=("Segoe UI", 8)).pack(side="left")
+        self._mil_state_combo = ttk.Combobox(row2, textvariable=self._mil_state_var,
+                                             width=30, state="readonly")
+        self._mil_state_combo.pack(side="left", padx=(0, 8))
 
         row3 = ttk.Frame(create_lf)
         row3.pack(fill="x", pady=3)
         ttk.Label(row3, text="Formation Type:", width=14, anchor="w").pack(side="left")
         ttk.Radiobutton(row3, text="Army", variable=self._mil_type_var,
-                        value="army").pack(side="left", padx=(0, 10))
+                        value="army", command=self._mil_on_type_change).pack(side="left", padx=(0, 10))
         ttk.Radiobutton(row3, text="Navy", variable=self._mil_type_var,
-                        value="navy").pack(side="left")
+                        value="navy", command=self._mil_on_type_change).pack(side="left")
 
         # Composition
         comp_lf = ttk.LabelFrame(create_lf, text="Composition", padding=(8, 4))
         comp_lf.pack(fill="x", pady=(6, 4))
 
-        comp_row = ttk.Frame(comp_lf)
-        comp_row.pack(anchor="w")
-        ttk.Label(comp_row, text="Infantry:").pack(side="left")
-        ttk.Entry(comp_row, textvariable=self._mil_infantry_var, width=6).pack(side="left", padx=(3, 14))
-        ttk.Label(comp_row, text="Artillery:").pack(side="left")
-        ttk.Entry(comp_row, textvariable=self._mil_artillery_var, width=6).pack(side="left", padx=(3, 14))
-        ttk.Label(comp_row, text="Cavalry:").pack(side="left")
-        ttk.Entry(comp_row, textvariable=self._mil_cavalry_var, width=6).pack(side="left", padx=(3, 0))
+        # Charger les types d'unités depuis les fichiers de données
+        land_units = self._mil_load_unit_types_from_file("00_land_combat_unit_types.txt")
+        navy_units = self._mil_load_unit_types_from_file("01_navy_combat_unit_types.txt")
+
+        inf_types     = land_units.get("Infantry",     ["combat_unit_type_line_infantry"])
+        art_types     = land_units.get("Artillery",    ["combat_unit_type_cannon_artillery"])
+        cav_types     = land_units.get("Cavalry",      ["combat_unit_type_hussars"])
+        light_types   = navy_units.get("Light Ships",  ["combat_unit_type_frigate"])
+        capital_types = navy_units.get("Capital Ships",["combat_unit_type_man_o_war"])
+        support_types = navy_units.get("Support Ships",["combat_unit_type_submarine"])
+
+        self._mil_infantry_type_var.set(inf_types[0]     if inf_types     else "")
+        self._mil_artillery_type_var.set(art_types[0]    if art_types     else "")
+        self._mil_cavalry_type_var.set(cav_types[0]      if cav_types     else "")
+        self._mil_light_ship_type_var.set(light_types[0]    if light_types   else "")
+        self._mil_capital_ship_type_var.set(capital_types[0] if capital_types else "")
+        self._mil_support_ship_type_var.set(support_types[0] if support_types else "")
+
+        _lw, _cw, _ew = 13, 30, 5   # label width, combo width, entry width
+
+        # ── Cadre Army ─────────────────────────────────────────
+        self._mil_army_comp_frame = ttk.Frame(comp_lf)
+        self._mil_army_comp_frame.pack(fill="x")
+
+        for label, type_var, types_list, count_var in [
+            ("Infantry:",  self._mil_infantry_type_var,  inf_types, self._mil_infantry_var),
+            ("Artillery:", self._mil_artillery_type_var, art_types, self._mil_artillery_var),
+            ("Cavalry:",   self._mil_cavalry_type_var,   cav_types, self._mil_cavalry_var),
+        ]:
+            r = ttk.Frame(self._mil_army_comp_frame)
+            r.pack(fill="x", pady=2)
+            ttk.Label(r, text=label, width=_lw, anchor="w").pack(side="left")
+            ttk.Combobox(r, textvariable=type_var, values=types_list,
+                         width=_cw, state="readonly").pack(side="left", padx=(0, 6))
+            ttk.Entry(r, textvariable=count_var, width=_ew).pack(side="left")
+
+        # ── Cadre Navy (caché par défaut) ──────────────────────
+        self._mil_navy_comp_frame = ttk.Frame(comp_lf)
+        # non pack() → caché tant qu'Army est sélectionné
+
+        for label, type_var, types_list, count_var in [
+            ("Light Ships:",   self._mil_light_ship_type_var,   light_types,   self._mil_light_ship_var),
+            ("Capital Ships:", self._mil_capital_ship_type_var, capital_types, self._mil_capital_ship_var),
+            ("Support Ships:", self._mil_support_ship_type_var, support_types, self._mil_support_ship_var),
+        ]:
+            r = ttk.Frame(self._mil_navy_comp_frame)
+            r.pack(fill="x", pady=2)
+            ttk.Label(r, text=label, width=_lw, anchor="w").pack(side="left")
+            ttk.Combobox(r, textvariable=type_var, values=types_list,
+                         width=_cw, state="readonly").pack(side="left", padx=(0, 6))
+            ttk.Entry(r, textvariable=count_var, width=_ew).pack(side="left")
 
         ttk.Button(create_lf, text="Create New Formation",
                    command=self._mil_create).pack(pady=(8, 2))
@@ -2126,13 +2190,185 @@ class PaysFrame(ttk.Frame):
 
     # ── Actions Military ───────────────────────────────────────
 
+    def _mil_get_formations_dir(self):
+        mod = self.config.mod_path
+        if not mod:
+            return None
+        path = os.path.join(mod, "common", "history", "military_formations")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def _mil_find_tag_file(self, tag):
+        """Trouve le fichier où le tag existe ou doit être ajouté.
+        Retourne (file_path, tag_exists, is_new_file)"""
+        formations_dir = self._mil_get_formations_dir()
+        if not formations_dir:
+            return None, False, True
+        
+        tag_upper = tag.upper()
+        
+        # Scanner tous les fichiers .txt dans le dossier (sauf example)
+        files = sorted([f for f in os.listdir(formations_dir) 
+                       if f.endswith('.txt') and 'example' not in f.lower()])
+        
+        for fname in files:
+            fpath = os.path.join(formations_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = f.read()
+                # Chercher le tag dans MILITARY_FORMATIONS avec une meilleure regex
+                # Cherche c:TAG ?= { dans le bloc MILITARY_FORMATIONS
+                if re.search(rf'MILITARY_FORMATIONS\s*=\s*\{{[^}}]*?c:{tag_upper}\s*\??=', content, re.DOTALL):
+                    return fpath, True, False
+            except Exception as e:
+                print(f"Erreur lecture {fname}: {e}")
+        
+        # Le tag n'existe pas - retourner le chemin pour 99_hmm_military_formations.txt
+        new_file = os.path.join(formations_dir, "99_hmm_military_formations.txt")
+        return new_file, False, True
+
     def _mil_get_file(self, tag):
+        """Ancienne fonction conservée pour compatibilité - retourne le fichier du tag"""
         mod = self.config.mod_path
         if not mod or not tag:
             return None
         path = os.path.join(mod, "common", "history", "military_formations")
         os.makedirs(path, exist_ok=True)
         return os.path.join(path, f"{tag}_formations.txt")
+
+    def _mil_load_strategic_regions_list(self):
+        """Charge la liste des régions stratégiques depuis le fichier data."""
+        base = os.path.dirname(os.path.abspath(__file__))
+        data_path = os.path.normpath(os.path.join(base, "..", "data",
+                                 "strategic_regions", "strategic_regions_by_continent.txt"))
+        items = []
+        try:
+            with open(data_path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line.startswith("#"):
+                        continent = line.lstrip("#").rstrip(":").strip().upper()
+                        items.append(f"── {continent} ──")
+                    else:
+                        items.append(line)
+        except Exception:
+            pass
+        return items
+
+    def _mil_on_sr_selected(self, event=None):
+        """Ignore la sélection si c'est un en-tête de continent."""
+        val = self._mil_sr_var.get()
+        if val.startswith("──"):
+            self._mil_sr_var.set("")
+
+    def _mil_load_unit_types_from_file(self, filename):
+        """Parse un fichier de types d'unités et retourne {section: [unit_types]}."""
+        base = os.path.dirname(os.path.abspath(__file__))
+        data_path = os.path.normpath(os.path.join(base, "..", "data",
+                                                   "combat_unit_types", filename))
+        result = {}
+        current_section = None
+        try:
+            with open(data_path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line.startswith("###"):
+                        current_section = line.lstrip("#").strip()
+                        result[current_section] = []
+                    elif current_section is not None:
+                        result[current_section].append(line)
+        except Exception as e:
+            print(f"Erreur lecture {data_path}: {e}")
+        return result
+
+    def _mil_on_type_change(self):
+        """Affiche le cadre Army ou Navy selon la sélection."""
+        if self._mil_type_var.get() == "army":
+            self._mil_navy_comp_frame.pack_forget()
+            self._mil_army_comp_frame.pack(fill="x")
+        else:
+            self._mil_army_comp_frame.pack_forget()
+            self._mil_navy_comp_frame.pack(fill="x")
+
+    def _mil_refresh_states(self):
+        """Charge les états possédés par le tag courant dans le combobox."""
+        tag = self._mil_tag_var.get().strip().upper()
+        states = self._mil_load_states_for_tag(tag)
+        self._mil_state_combo["values"] = states
+        if states:
+            if self._mil_state_var.get() not in states:
+                self._mil_state_var.set(states[0])
+        else:
+            self._mil_state_var.set("")
+
+    def _mil_load_states_for_tag(self, tag):
+        """Parse le fichier 00_states.txt du mod et retourne les états du tag."""
+        mod = self.config.mod_path
+        if not mod or not tag:
+            return []
+        states_file = os.path.join(mod, "common", "history", "states", "00_states.txt")
+        if not os.path.exists(states_file):
+            return []
+        states = []
+        try:
+            with open(states_file, "r", encoding="utf-8") as fh:
+                content = fh.read()
+            pattern = (
+                rf's:(\w+)\s*=\s*\{{[^{{]*?'
+                rf'create_state\s*=\s*\{{[^{{]*?'
+                rf'country\s*=\s*c:{re.escape(tag.upper())}\b'
+            )
+            for m in re.finditer(pattern, content, re.DOTALL):
+                state = m.group(1)
+                if state not in states:
+                    states.append(state)
+        except Exception as e:
+            print(f"Erreur lecture states: {e}")
+        return sorted(states)
+
+    def _mil_get_next_formation_index(self, tag):
+        """Retourne le prochain indice de formation pour ce tag (basé sur le fichier de localisation)."""
+        mod = self.config.mod_path
+        if not mod:
+            return 1
+        yml_path = os.path.join(mod, "localization", "english",
+                                "00_hmm_military_formation_name_l_english.yml")
+        if not os.path.exists(yml_path):
+            return 1
+        try:
+            with open(yml_path, "r", encoding="utf-8-sig") as fh:
+                content = fh.read()
+            indices = re.findall(
+                rf'{re.escape(tag.upper())}_MILITARY_FORMATION_(\d+)', content, re.IGNORECASE
+            )
+            return max((int(i) for i in indices), default=0) + 1
+        except Exception:
+            return 1
+
+    def _mil_write_localization(self, tag, key, display_name):
+        """Écrit la clé de localisation dans le fichier YML."""
+        mod = self.config.mod_path
+        if not mod:
+            return
+        loc_dir = os.path.join(mod, "localization", "english")
+        os.makedirs(loc_dir, exist_ok=True)
+        yml_path = os.path.join(loc_dir, "00_hmm_military_formation_name_l_english.yml")
+        entry = f' {key}: "{display_name}"\n'
+        if os.path.exists(yml_path):
+            with open(yml_path, "r", encoding="utf-8-sig") as fh:
+                content = fh.read()
+            if not content.endswith("\n"):
+                content += "\n"
+            content += entry
+            with open(yml_path, "w", encoding="utf-8-sig") as fh:
+                fh.write(content)
+        else:
+            with open(yml_path, "w", encoding="utf-8-sig") as fh:
+                fh.write(f"l_english:\n{entry}")
 
     def _mil_create(self):
         tag = self._mil_tag_var.get().strip().upper()
@@ -2141,79 +2377,209 @@ class PaysFrame(ttk.Frame):
             messagebox.showerror("Erreur", "Country Tag et Formation Name sont obligatoires")
             return
 
-        fpath = self._mil_get_file(tag)
-        state = self._mil_state_var.get().strip()
-        ftype = self._mil_type_var.get()
+        # Trouver le fichier où ajouter le tag (existant ou nouveau)
+        fpath, tag_exists, is_new = self._mil_find_tag_file(tag)
+        if not fpath:
+            messagebox.showerror("Erreur", "Impossible de trouver le dossier des formations")
+            return
+
+        state    = self._mil_state_var.get().strip()
+        hq_region = self._mil_sr_var.get().strip()
+        ftype    = self._mil_type_var.get()
 
         try:
-            infantry  = int(self._mil_infantry_var.get() or 0)
-            artillery = int(self._mil_artillery_var.get() or 0)
-            cavalry   = int(self._mil_cavalry_var.get() or 0)
+            infantry      = int(self._mil_infantry_var.get()     or 0)
+            artillery     = int(self._mil_artillery_var.get()    or 0)
+            cavalry       = int(self._mil_cavalry_var.get()      or 0)
+            light_count   = int(self._mil_light_ship_var.get()   or 0)
+            capital_count = int(self._mil_capital_ship_var.get() or 0)
+            support_count = int(self._mil_support_ship_var.get() or 0)
         except ValueError:
             messagebox.showerror("Erreur", "Les valeurs de composition doivent être des entiers")
             return
 
+        # Générer la clé de localisation et l'écrire dans le YML
+        idx = self._mil_get_next_formation_index(tag)
+        loc_key = f"{tag}_MILITARY_FORMATION_{idx:02d}"
+        self._mil_write_localization(tag, loc_key, name)
+
+        # Déterminer le type d'unité selon le type de formation
+        unit_type = "army"
+        if ftype == "navy":
+            unit_type = "fleet"
+
+        # Générer les combat_unit blocks
+        state_code = state if state else "STATE_CAPITAL"
         units_str = ""
         if ftype == "army":
             if infantry:
-                units_str += f"\n\t\t\tadd_battalion = {{ type = infantry count = {infantry} }}"
+                ut = self._mil_infantry_type_var.get() or "combat_unit_type_line_infantry"
+                units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {infantry}\n\t\t\t}}"
             if artillery:
-                units_str += f"\n\t\t\tadd_battalion = {{ type = artillery count = {artillery} }}"
+                ut = self._mil_artillery_type_var.get() or "combat_unit_type_cannon_artillery"
+                units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {artillery}\n\t\t\t}}"
             if cavalry:
-                units_str += f"\n\t\t\tadd_battalion = {{ type = cavalry count = {cavalry} }}"
-        else:
-            if infantry:
-                units_str += f"\n\t\t\tadd_ship = {{ type = man_o_war count = {infantry} }}"
+                ut = self._mil_cavalry_type_var.get() or "combat_unit_type_hussars"
+                units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {cavalry}\n\t\t\t}}"
+        else:  # navy
+            if light_count:
+                ut = self._mil_light_ship_type_var.get() or "combat_unit_type_frigate"
+                units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {light_count}\n\t\t\t}}"
+            if capital_count:
+                ut = self._mil_capital_ship_type_var.get() or "combat_unit_type_man_o_war"
+                units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {capital_count}\n\t\t\t}}"
+            if support_count:
+                ut = self._mil_support_ship_type_var.get() or "combat_unit_type_submarine"
+                units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {support_count}\n\t\t\t}}"
 
-        state_line = f"\n\t\tlocation = s:{state}" if state else ""
-        block = (
-            f"\n\tc:{tag} ?= {{\n"
-            f"\t\tcreate_{'army' if ftype == 'army' else 'navy'} = {{"
-            f"\n\t\t\tname = \"{name}\""
-            f"{state_line}"
-            f"{units_str}"
-            f"\n\t\t}}\n\t}}\n"
+        # Générer le bloc au nouveau format
+        hq_str = f"sr:{hq_region}" if hq_region else "sr:region_capital"
+        formation_block = (
+            f"\n\t\tcreate_military_formation = {{\n"
+            f"\t\t\ttype = {unit_type}\n"
+            f"\t\t\thq_region = {hq_str}\n"
+            f"\t\t\tname = {loc_key}\n"
+            f"{units_str}\n"
+            f"\t\t}}\n"
         )
 
+        # Lire le contenu existant
         existing = ""
         if os.path.exists(fpath):
             with open(fpath, "r", encoding="utf-8") as f:
                 existing = f.read()
 
-        if "MILITARY_FORMATION" not in existing and existing:
-            content = existing.rstrip() + block
-        elif existing:
-            content = existing.rstrip().rstrip("}").rstrip() + block + "}\n"
+        # Insérer le bloc dans MILITARY_FORMATIONS
+        if "MILITARY_FORMATIONS" in existing:
+            # Le fichier a déjà MILITARY_FORMATIONS
+            if tag_exists:
+                # Le tag existe déjà - ajouter après le bloc du tag
+                # Trouver la position après le bloc du tag
+                tag_pattern = rf'(c:{tag}\s*\??=\s*\{{)'
+                match = re.search(tag_pattern, existing)
+                if match:
+                    # Trouver la fin du bloc du tag
+                    brace_start = match.end() - 1
+                    depth = 0
+                    for i in range(brace_start, len(existing)):
+                        if existing[i] == '{':
+                            depth += 1
+                        elif existing[i] == '}':
+                            depth -= 1
+                            if depth == 0:
+                                # Insérer juste avant la fermeture du bloc du tag
+                                insert_pos = i
+                                existing = existing[:insert_pos] + formation_block + existing[insert_pos:]
+                                break
+            else:
+                # Le tag n'existe pas - ajouter un nouveau bloc
+                # Trouver la fin de MILITARY_FORMATIONS
+                match = re.search(r'(MILITARY_FORMATIONS\s*=\s*\{)', existing)
+                if match:
+                    brace_start = match.end() - 1
+                    depth = 0
+                    for i in range(brace_start, len(existing)):
+                        if existing[i] == '{':
+                            depth += 1
+                        elif existing[i] == '}':
+                            depth -= 1
+                            if depth == 0:
+                                # Insérer juste avant la fermeture
+                                insert_pos = i
+                                tag_block = f"\n\tc:{tag} ?= {{{formation_block}\t}}\n"
+                                existing = existing[:insert_pos] + tag_block + existing[insert_pos:]
+                                break
         else:
-            content = f"MILITARY_FORMATION = {{{block}}}\n"
+            # Créer un nouveau fichier MILITARY_FORMATIONS
+            content = f"MILITARY_FORMATIONS = {{\n\tc:{tag} ?= {{{formation_block}\t}}\n}}\n"
+            existing = content
 
         with open(fpath, "w", encoding="utf-8") as f:
-            f.write(content)
+            f.write(existing)
 
-        messagebox.showinfo("OK", f"Formation '{name}' créée pour {tag}")
+        messagebox.showinfo("OK", f"Formation '{name}' créée pour {tag}\nFichier: {os.path.basename(fpath)}")
         if self._mil_manage_tag.get().strip().upper() == tag:
             self._mil_load_formations()
 
     def _mil_load_formations(self):
         tag = self._mil_tag_var.get().strip().upper()
         self._mil_manage_tag.set(tag)
-        fpath = self._mil_get_file(tag)
         self._mil_listbox.delete(0, tk.END)
         self._mil_formations = []
 
-        if not fpath or not os.path.exists(fpath):
+        # Rafraîchir le combobox des états pour ce pays
+        self._mil_refresh_states()
+
+        if not tag:
             return
 
-        with open(fpath, "r", encoding="utf-8") as f:
-            content = f.read()
+        # Scanner tous les fichiers dans le dossier military_formations (sauf example)
+        formations_dir = self._mil_get_formations_dir()
+        if not formations_dir or not os.path.exists(formations_dir):
+            return
 
-        for m in re.finditer(
-            r'create_(?:army|navy)\s*=\s*\{[^}]*name\s*=\s*"([^"]*)"',
-            content, re.DOTALL
-        ):
-            name = m.group(1)
-            self._mil_formations.append({"name": name, "match_start": m.start()})
-            self._mil_listbox.insert(tk.END, name)
+        files = sorted([f for f in os.listdir(formations_dir) 
+                       if f.endswith('.txt') and 'example' not in f.lower()])
+        
+        for fname in files:
+            fpath = os.path.join(formations_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception as e:
+                print(f"Erreur lecture {fname}: {e}")
+                continue
+
+            # Chercher le bloc du tag dans ce fichier
+            # Cherche c:TAG ?= { ... } dans MILITARY_FORMATIONS
+            tag_pattern = rf'c:{tag}\s*\??=\s*\{{'
+            tag_match = re.search(tag_pattern, content)
+            if not tag_match:
+                continue
+            
+            # Extraire le bloc du tag pour chercher les formations
+            tag_start = tag_match.start()
+            brace_start = tag_match.end() - 1
+            depth = 0
+            tag_end = brace_start
+            for i in range(brace_start, len(content)):
+                if content[i] == '{':
+                    depth += 1
+                elif content[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        tag_end = i + 1
+                        break
+            
+            tag_block = content[tag_start:tag_end]
+            
+            # Chercher les formations au nouveau format (create_military_formation) dans le bloc du tag
+            for m in re.finditer(
+                r'create_military_formation\s*=\s*\{[^}]*?name\s*=\s*(\w+)',
+                tag_block, re.DOTALL
+            ):
+                name = m.group(1)
+                self._mil_formations.append({
+                    "name": name, 
+                    "match_start": m.start() + tag_start,
+                    "file": fpath
+                })
+                self._mil_listbox.insert(tk.END, f"{name} ({fname})")
+            
+            # Chercher aussi les formations à l'ancien format (create_army/create_navy) dans le bloc du tag
+            for m in re.finditer(
+                r'create_(?:army|navy)\s*=\s*\{[^}]*name\s*=\s*"([^"]*)"',
+                tag_block, re.DOTALL
+            ):
+                name = m.group(1)
+                # Éviter les doublons
+                if not any(f["name"] == name for f in self._mil_formations):
+                    self._mil_formations.append({
+                        "name": name, 
+                        "match_start": m.start() + tag_start,
+                        "file": fpath
+                    })
+                    self._mil_listbox.insert(tk.END, f"{name} ({fname})")
 
     def _mil_on_select(self, *_):
         sel = self._mil_listbox.curselection()

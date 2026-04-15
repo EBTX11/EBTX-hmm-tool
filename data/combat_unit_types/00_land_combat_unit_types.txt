@@ -1,0 +1,21 @@
+﻿### Infantry
+combat_unit_type_irregular_infantry
+combat_unit_type_line_infantry
+combat_unit_type_skirmish_infantry
+combat_unit_type_trench_infantry
+combat_unit_type_squad_infantry
+combat_unit_type_mechanized_infantry
+
+### Artillery
+combat_unit_type_cannon_artillery
+combat_unit_type_mobile_artillery
+combat_unit_type_shrapnel_artillery
+combat_unit_type_siege_artillery
+combat_unit_type_heavy_tank
+
+### Cavalry
+combat_unit_type_hussars
+combat_unit_type_dragoons
+combat_unit_type_cuirassiers
+combat_unit_type_lancers
+combat_unit_type_light_tanks
