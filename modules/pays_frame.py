@@ -1166,7 +1166,7 @@ class PaysFrame(ttk.Frame):
         subj_lf = ttk.LabelFrame(lists_frame, text="Subject Relationships", padding=(6, 4))
         subj_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         self._dipl_subj_lb = tk.Listbox(subj_lf, selectmode=tk.SINGLE, activestyle="none",
-                                         font=("Segoe UI", 9), height=10)
+                                         font=("Segoe UI", 9), height=8)
         subj_sb = ttk.Scrollbar(subj_lf, command=self._dipl_subj_lb.yview)
         self._dipl_subj_lb.config(yscrollcommand=subj_sb.set)
         self._dipl_subj_lb.pack(side="left", fill="both", expand=True)
@@ -1174,11 +1174,24 @@ class PaysFrame(ttk.Frame):
         ttk.Button(subj_lf, text="Remove Selected",
                    command=lambda: self._dipl_remove(self._dipl_subj_lb)).pack(fill="x", pady=(4, 0))
 
+        # Add Subject Relationship (inside Subject panel)
+        self._dipl_subj_target_var = tk.StringVar()
+        self._dipl_subj_type_var   = tk.StringVar(value="colony")
+        _subj_types = ["colony", "puppet", "dominion", "protectorate",
+                       "personal_union", "tributary", "vassal"]
+        add_subj_inner = ttk.Frame(subj_lf)
+        add_subj_inner.pack(fill="x", pady=(6, 0))
+        ttk.Label(add_subj_inner, text="Target:").pack(side="left")
+        ttk.Entry(add_subj_inner, textvariable=self._dipl_subj_target_var, width=6).pack(side="left", padx=2)
+        ttk.Combobox(add_subj_inner, textvariable=self._dipl_subj_type_var,
+                     values=_subj_types, width=12, state="readonly").pack(side="left", padx=2)
+        ttk.Button(add_subj_inner, text="Add", command=self._dipl_add_subject).pack(side="left", padx=2)
+
         # Hostile / Truces / Embargo
         host_lf = ttk.LabelFrame(lists_frame, text="Hostile / Truces / Embargo", padding=(6, 4))
         host_lf.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         self._dipl_host_lb = tk.Listbox(host_lf, selectmode=tk.SINGLE, activestyle="none",
-                                         font=("Segoe UI", 9), height=10)
+                                         font=("Segoe UI", 9), height=8)
         host_sb = ttk.Scrollbar(host_lf, command=self._dipl_host_lb.yview)
         self._dipl_host_lb.config(yscrollcommand=host_sb.set)
         self._dipl_host_lb.pack(side="left", fill="both", expand=True)
@@ -1186,48 +1199,27 @@ class PaysFrame(ttk.Frame):
         ttk.Button(host_lf, text="Remove Selected",
                    command=lambda: self._dipl_remove(self._dipl_host_lb)).pack(fill="x", pady=(4, 0))
 
-        # ── Add New Relationship ───────────────────────────────
-        add_lf = ttk.LabelFrame(f, text="Add New Relationship", padding=(10, 6))
-        add_lf.pack(fill="x", padx=10, pady=(10, 4))
-
-        self._dipl_target_var  = tk.StringVar()
-        self._dipl_rel_type    = tk.StringVar(value="subject")
-        self._dipl_subj_type   = tk.StringVar(value="colony")
-
-        add_row = ttk.Frame(add_lf)
-        add_row.pack(fill="x")
-
-        ttk.Label(add_row, text="Target Tag:").pack(side="left")
-        ttk.Entry(add_row, textvariable=self._dipl_target_var, width=8).pack(side="left", padx=(4, 14))
-
-        _subj_types   = ["colony", "puppet", "dominion", "protectorate",
-                          "personal_union", "tributary", "vassal"]
+        # Add Hostile / Truce / Embargo (inside Hostile panel)
+        self._dipl_host_target_var = tk.StringVar()
+        self._dipl_host_type_var   = tk.StringVar(value="rivalry")
         _hostile_types = ["rivalry", "embargo", "truce"]
+        add_host_inner = ttk.Frame(host_lf)
+        add_host_inner.pack(fill="x", pady=(6, 0))
+        ttk.Label(add_host_inner, text="Target:").pack(side="left")
+        ttk.Entry(add_host_inner, textvariable=self._dipl_host_target_var, width=6).pack(side="left", padx=2)
+        ttk.Combobox(add_host_inner, textvariable=self._dipl_host_type_var,
+                     values=_hostile_types, width=10, state="readonly").pack(side="left", padx=2)
+        ttk.Button(add_host_inner, text="Add", command=self._dipl_add_hostile).pack(side="left", padx=2)
 
-        ttk.Radiobutton(add_row, text="Subject", variable=self._dipl_rel_type,
-                        value="subject").pack(side="left", padx=2)
-        ttk.Radiobutton(add_row, text="Hostile/Truce/Embargo", variable=self._dipl_rel_type,
-                        value="hostile").pack(side="left", padx=2)
+        # ── Rivalités + Set Relations côte à côte ──────────────
+        riv_rel_frame = ttk.Frame(f)
+        riv_rel_frame.pack(fill="x", padx=10, pady=(4, 10))
+        riv_rel_frame.columnconfigure(0, weight=1)
+        riv_rel_frame.columnconfigure(1, weight=1)
 
-        self._dipl_type_cb = ttk.Combobox(add_row, textvariable=self._dipl_subj_type,
-                                           values=_subj_types, width=16, state="readonly")
-        self._dipl_type_cb.pack(side="left", padx=(10, 6))
-
-        def _on_rel_type_change(*_):
-            if self._dipl_rel_type.get() == "subject":
-                self._dipl_type_cb["values"] = _subj_types
-                self._dipl_subj_type.set(_subj_types[0])
-            else:
-                self._dipl_type_cb["values"] = _hostile_types
-                self._dipl_subj_type.set(_hostile_types[0])
-
-        self._dipl_rel_type.trace_add("write", _on_rel_type_change)
-        ttk.Button(add_row, text="Create",
-                   command=self._dipl_add_relationship).pack(side="left", padx=4)
-
-        # ── Rivalités ─────────────────────────────────────────
-        riv_lf = ttk.LabelFrame(f, text="Rivalités", padding=(10, 6))
-        riv_lf.pack(fill="x", padx=10, pady=(4, 4))
+        # Rivalités (gauche)
+        riv_lf = ttk.LabelFrame(riv_rel_frame, text="Rivalités", padding=(10, 6))
+        riv_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         riv_lf.columnconfigure(0, weight=1)
 
         riv_tv_frame = ttk.Frame(riv_lf)
@@ -1254,15 +1246,15 @@ class PaysFrame(ttk.Frame):
                    command=self._dipl_riv_delete).grid(
             row=2, column=0, columnspan=2, sticky="ew")
 
-        # ── Set Relations ──────────────────────────────────────
-        rel_lf = ttk.LabelFrame(f, text="Set Relations", padding=(10, 6))
-        rel_lf.pack(fill="x", padx=10, pady=(4, 10))
+        # Set Relations (droite)
+        rel_lf = ttk.LabelFrame(riv_rel_frame, text="Set Relations", padding=(10, 6))
+        rel_lf.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         rel_lf.columnconfigure(0, weight=1)
 
         tv_frame = ttk.Frame(rel_lf)
         tv_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         self._dipl_rel_tv = ttk.Treeview(tv_frame, columns=("tag", "val"),
-                                          show="headings", height=6, selectmode="browse")
+                                          show="headings", height=5, selectmode="browse")
         self._dipl_rel_tv.heading("tag", text="Target Tag")
         self._dipl_rel_tv.heading("val", text="Valeur")
         self._dipl_rel_tv.column("tag", width=120)
@@ -1498,17 +1490,24 @@ class PaysFrame(ttk.Frame):
 
         self._dipl_status.config(text="Sauvegardé !", foreground="#6f6")
 
-    def _dipl_add_relationship(self):
-        target = self._dipl_target_var.get().strip().upper()
+    def _dipl_add_subject(self):
+        target = self._dipl_subj_target_var.get().strip().upper()
         if not target:
             messagebox.showerror("Erreur", "Entre un Target Tag")
             return
-        rel = self._dipl_rel_type.get()
-        if rel == "subject":
-            self._dipl_subj_lb.insert(tk.END, f"{target} ({self._dipl_subj_type.get()})")
-        else:
-            self._dipl_host_lb.insert(tk.END, f"{target} ({self._dipl_subj_type.get()})")
-        self._dipl_target_var.set("")
+        subj_type = self._dipl_subj_type_var.get()
+        self._dipl_subj_lb.insert(tk.END, f"{target} ({subj_type})")
+        self._dipl_subj_target_var.set("")
+        self._dipl_save_all()
+
+    def _dipl_add_hostile(self):
+        target = self._dipl_host_target_var.get().strip().upper()
+        if not target:
+            messagebox.showerror("Erreur", "Entre un Target Tag")
+            return
+        host_type = self._dipl_host_type_var.get()
+        self._dipl_host_lb.insert(tk.END, f"{target} ({host_type})")
+        self._dipl_host_target_var.set("")
         self._dipl_save_all()
 
     def _dipl_rel_on_select(self, *_):
