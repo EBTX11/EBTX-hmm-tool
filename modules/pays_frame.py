@@ -1162,7 +1162,7 @@ class PaysFrame(ttk.Frame):
         lists_frame.columnconfigure(0, weight=1)
         lists_frame.columnconfigure(1, weight=1)
 
-        # Subject Relationships
+        # Subject Relationships (gauche)
         subj_lf = ttk.LabelFrame(lists_frame, text="Subject Relationships", padding=(6, 4))
         subj_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         self._dipl_subj_lb = tk.Listbox(subj_lf, selectmode=tk.SINGLE, activestyle="none",
@@ -1171,24 +1171,24 @@ class PaysFrame(ttk.Frame):
         self._dipl_subj_lb.config(yscrollcommand=subj_sb.set)
         self._dipl_subj_lb.pack(side="left", fill="both", expand=True)
         subj_sb.pack(side="right", fill="y")
-        ttk.Button(subj_lf, text="Remove Selected",
-                   command=lambda: self._dipl_remove(self._dipl_subj_lb)).pack(fill="x", pady=(4, 0))
 
-        # Add Subject Relationship (inside Subject panel)
+        # Add/Modify/Remove Subject Relationship
         self._dipl_subj_target_var = tk.StringVar()
         self._dipl_subj_type_var   = tk.StringVar(value="colony")
         _subj_types = ["colony", "puppet", "dominion", "protectorate",
-                       "personal_union", "tributary", "vassal"]
-        add_subj_inner = ttk.Frame(subj_lf)
-        add_subj_inner.pack(fill="x", pady=(6, 0))
-        ttk.Label(add_subj_inner, text="Target:").pack(side="left")
-        ttk.Entry(add_subj_inner, textvariable=self._dipl_subj_target_var, width=6).pack(side="left", padx=2)
-        ttk.Combobox(add_subj_inner, textvariable=self._dipl_subj_type_var,
+                       "personal_union", "tributary", "vassal", "chartered_company"]
+        subj_form = ttk.Frame(subj_lf)
+        subj_form.pack(fill="x", pady=(6, 0))
+        ttk.Label(subj_form, text="Target:").pack(side="left")
+        ttk.Entry(subj_form, textvariable=self._dipl_subj_target_var, width=6).pack(side="left", padx=2)
+        ttk.Combobox(subj_form, textvariable=self._dipl_subj_type_var,
                      values=_subj_types, width=12, state="readonly").pack(side="left", padx=2)
-        ttk.Button(add_subj_inner, text="Add", command=self._dipl_add_subject).pack(side="left", padx=2)
+        ttk.Button(subj_form, text="Add", command=self._dipl_add_subject).pack(side="left", padx=2)
+        ttk.Button(subj_form, text="Modify", command=self._dipl_modify_subject).pack(side="left", padx=2)
+        ttk.Button(subj_form, text="Remove", command=lambda: self._dipl_remove(self._dipl_subj_lb)).pack(side="left", padx=2)
 
-        # Hostile / Truces / Embargo
-        host_lf = ttk.LabelFrame(lists_frame, text="Hostile / Truces / Embargo", padding=(6, 4))
+        # Rivalité / Truce / Embargo (droite) - Fusionné
+        host_lf = ttk.LabelFrame(lists_frame, text="Rivalité / Truce / Embargo", padding=(6, 4))
         host_lf.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         self._dipl_host_lb = tk.Listbox(host_lf, selectmode=tk.SINGLE, activestyle="none",
                                          font=("Segoe UI", 9), height=8)
@@ -1196,59 +1196,24 @@ class PaysFrame(ttk.Frame):
         self._dipl_host_lb.config(yscrollcommand=host_sb.set)
         self._dipl_host_lb.pack(side="left", fill="both", expand=True)
         host_sb.pack(side="right", fill="y")
-        ttk.Button(host_lf, text="Remove Selected",
-                   command=lambda: self._dipl_remove(self._dipl_host_lb)).pack(fill="x", pady=(4, 0))
 
-        # Add Hostile / Truce / Embargo (inside Hostile panel)
+        # Add/Modify/Remove Hostile/Truce/Embargo
         self._dipl_host_target_var = tk.StringVar()
         self._dipl_host_type_var   = tk.StringVar(value="rivalry")
         _hostile_types = ["rivalry", "embargo", "truce"]
-        add_host_inner = ttk.Frame(host_lf)
-        add_host_inner.pack(fill="x", pady=(6, 0))
-        ttk.Label(add_host_inner, text="Target:").pack(side="left")
-        ttk.Entry(add_host_inner, textvariable=self._dipl_host_target_var, width=6).pack(side="left", padx=2)
-        ttk.Combobox(add_host_inner, textvariable=self._dipl_host_type_var,
+        host_form = ttk.Frame(host_lf)
+        host_form.pack(fill="x", pady=(6, 0))
+        ttk.Label(host_form, text="Target:").pack(side="left")
+        ttk.Entry(host_form, textvariable=self._dipl_host_target_var, width=6).pack(side="left", padx=2)
+        ttk.Combobox(host_form, textvariable=self._dipl_host_type_var,
                      values=_hostile_types, width=10, state="readonly").pack(side="left", padx=2)
-        ttk.Button(add_host_inner, text="Add", command=self._dipl_add_hostile).pack(side="left", padx=2)
+        ttk.Button(host_form, text="Add", command=self._dipl_add_hostile).pack(side="left", padx=2)
+        ttk.Button(host_form, text="Modify", command=self._dipl_modify_hostile).pack(side="left", padx=2)
+        ttk.Button(host_form, text="Remove", command=lambda: self._dipl_remove(self._dipl_host_lb)).pack(side="left", padx=2)
 
-        # ── Rivalités + Set Relations côte à côte ──────────────
-        riv_rel_frame = ttk.Frame(f)
-        riv_rel_frame.pack(fill="x", padx=10, pady=(4, 10))
-        riv_rel_frame.columnconfigure(0, weight=1)
-        riv_rel_frame.columnconfigure(1, weight=1)
-
-        # Rivalités (gauche)
-        riv_lf = ttk.LabelFrame(riv_rel_frame, text="Rivalités", padding=(10, 6))
-        riv_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        riv_lf.columnconfigure(0, weight=1)
-
-        riv_tv_frame = ttk.Frame(riv_lf)
-        riv_tv_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
-        self._dipl_riv_tv = ttk.Treeview(riv_tv_frame, columns=("tag",),
-                                          show="headings", height=5, selectmode="browse")
-        self._dipl_riv_tv.heading("tag", text="Target Tag")
-        self._dipl_riv_tv.column("tag", width=160)
-        riv_tv_sb = ttk.Scrollbar(riv_tv_frame, command=self._dipl_riv_tv.yview)
-        self._dipl_riv_tv.config(yscrollcommand=riv_tv_sb.set)
-        self._dipl_riv_tv.pack(side="left", fill="both", expand=True)
-        riv_tv_sb.pack(side="right", fill="y")
-
-        riv_form = ttk.Frame(riv_lf)
-        riv_form.grid(row=0, column=1, sticky="n")
-        self._dipl_riv_target_var = tk.StringVar()
-        ttk.Label(riv_form, text="Target :").grid(row=0, column=0, sticky="w", pady=3)
-        ttk.Entry(riv_form, textvariable=self._dipl_riv_target_var, width=10).grid(
-            row=0, column=1, padx=4, pady=3)
-        ttk.Button(riv_form, text="Ajouter",
-                   command=self._dipl_riv_add).grid(
-            row=1, column=0, columnspan=2, sticky="ew", pady=(8, 3))
-        ttk.Button(riv_form, text="Supprimer",
-                   command=self._dipl_riv_delete).grid(
-            row=2, column=0, columnspan=2, sticky="ew")
-
-        # Set Relations (droite)
-        rel_lf = ttk.LabelFrame(riv_rel_frame, text="Set Relations", padding=(10, 6))
-        rel_lf.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        # ── Set Relations (pleine largeur) ─────────────────────
+        rel_lf = ttk.LabelFrame(f, text="Set Relations", padding=(10, 6))
+        rel_lf.pack(fill="x", padx=10, pady=(4, 10))
         rel_lf.columnconfigure(0, weight=1)
 
         tv_frame = ttk.Frame(rel_lf)
@@ -1257,8 +1222,8 @@ class PaysFrame(ttk.Frame):
                                           show="headings", height=5, selectmode="browse")
         self._dipl_rel_tv.heading("tag", text="Target Tag")
         self._dipl_rel_tv.heading("val", text="Valeur")
-        self._dipl_rel_tv.column("tag", width=120)
-        self._dipl_rel_tv.column("val", width=70, anchor="center")
+        self._dipl_rel_tv.column("tag", width=200)
+        self._dipl_rel_tv.column("val", width=80, anchor="center")
         rel_tv_sb = ttk.Scrollbar(tv_frame, command=self._dipl_rel_tv.yview)
         self._dipl_rel_tv.config(yscrollcommand=rel_tv_sb.set)
         self._dipl_rel_tv.pack(side="left", fill="both", expand=True)
@@ -1302,7 +1267,6 @@ class PaysFrame(ttk.Frame):
         dipl_dir = os.path.join(mod, "common", "history", "diplomacy")
         self._dipl_subj_lb.delete(0, tk.END)
         self._dipl_host_lb.delete(0, tk.END)
-        self._dipl_riv_tv.delete(*self._dipl_riv_tv.get_children())
         self._dipl_rel_tv.delete(*self._dipl_rel_tv.get_children())
 
         if not os.path.exists(dipl_dir):
@@ -1310,7 +1274,7 @@ class PaysFrame(ttk.Frame):
             return
 
         _subject_types = {"colony", "puppet", "dominion", "protectorate",
-                          "personal_union", "tributary", "vassal"}
+                          "personal_union", "tributary", "vassal", "chartered_company"}
         subj_count = 0
         host_count = 0
         riv_count = 0
@@ -1351,12 +1315,13 @@ class PaysFrame(ttk.Frame):
                 if pact_type in _subject_types:
                     self._dipl_subj_lb.insert(tk.END, f"{target} ({pact_type})")
                     subj_count += 1
-                elif pact_type == "rivalry":
-                    self._dipl_riv_tv.insert("", tk.END, values=(target,))
-                    riv_count += 1
                 else:
+                    # rivalry, embargo, truce - tous dans le panneau host_lb
                     self._dipl_host_lb.insert(tk.END, f"{target} ({pact_type})")
-                    host_count += 1
+                    if pact_type == "rivalry":
+                        riv_count += 1
+                    else:
+                        host_count += 1
 
             # set_relations entries (only from "relation" files)
             if "relation" in fname.lower():
@@ -1414,13 +1379,6 @@ class PaysFrame(ttk.Frame):
                 keyword, default = _type_routing.get(pact_type, ("relation", "00_hmm_relations.txt"))
                 fp = _find_file(keyword, default)
                 pacts_by_file.setdefault(fp, []).append((m.group(1), pact_type))
-
-        # Collect rivalry entries from treeview → always go to the "rival" file
-        riv_fp = _find_file("rival", "00_hmm_rivalries.txt")
-        riv_targets = [self._dipl_riv_tv.item(iid, "values")[0]
-                       for iid in self._dipl_riv_tv.get_children()]
-        for tgt in riv_targets:
-            pacts_by_file.setdefault(riv_fp, []).append((tgt, "rivalry"))
 
         # Collect set_relations from treeview → always go to the "relation" file
         rel_fp = _find_file("relation", "00_hmm_relations.txt")
@@ -1500,6 +1458,21 @@ class PaysFrame(ttk.Frame):
         self._dipl_subj_target_var.set("")
         self._dipl_save_all()
 
+    def _dipl_modify_subject(self):
+        sel = self._dipl_subj_lb.curselection()
+        if not sel:
+            messagebox.showerror("Erreur", "Sélectionne une entrée à modifier")
+            return
+        target = self._dipl_subj_target_var.get().strip().upper()
+        if not target:
+            messagebox.showerror("Erreur", "Entre un Target Tag")
+            return
+        subj_type = self._dipl_subj_type_var.get()
+        self._dipl_subj_lb.delete(sel[0])
+        self._dipl_subj_lb.insert(sel[0], f"{target} ({subj_type})")
+        self._dipl_subj_target_var.set("")
+        self._dipl_save_all()
+
     def _dipl_add_hostile(self):
         target = self._dipl_host_target_var.get().strip().upper()
         if not target:
@@ -1507,6 +1480,21 @@ class PaysFrame(ttk.Frame):
             return
         host_type = self._dipl_host_type_var.get()
         self._dipl_host_lb.insert(tk.END, f"{target} ({host_type})")
+        self._dipl_host_target_var.set("")
+        self._dipl_save_all()
+
+    def _dipl_modify_hostile(self):
+        sel = self._dipl_host_lb.curselection()
+        if not sel:
+            messagebox.showerror("Erreur", "Sélectionne une entrée à modifier")
+            return
+        target = self._dipl_host_target_var.get().strip().upper()
+        if not target:
+            messagebox.showerror("Erreur", "Entre un Target Tag")
+            return
+        host_type = self._dipl_host_type_var.get()
+        self._dipl_host_lb.delete(sel[0])
+        self._dipl_host_lb.insert(sel[0], f"{target} ({host_type})")
         self._dipl_host_target_var.set("")
         self._dipl_save_all()
 
@@ -1548,23 +1536,8 @@ class PaysFrame(ttk.Frame):
             self._dipl_rel_target_var.set("")
             self._dipl_rel_value_var.set("0")
 
-    def _dipl_riv_add(self):
-        target = self._dipl_riv_target_var.get().strip().upper()
-        if not target:
-            messagebox.showerror("Erreur", "Entre un Target Tag")
-            return
-        # Avoid duplicate
-        for iid in self._dipl_riv_tv.get_children():
-            if self._dipl_riv_tv.item(iid, "values")[0] == target:
-                return
-        self._dipl_riv_tv.insert("", tk.END, values=(target,))
-        self._dipl_riv_target_var.set("")
-
-    def _dipl_riv_delete(self):
-        sel = self._dipl_riv_tv.selection()
-        if sel:
-            self._dipl_riv_tv.delete(sel[0])
-            self._dipl_riv_target_var.set("")
+    # Rivalités maintenant gérées via _dipl_host_lb (type "rivalry")
+    # Les méthodes _dipl_riv_add et _dipl_riv_delete ne sont plus utilisées
 
     def _tab_power_blocs(self, nb):
         f = ttk.Frame(nb)
