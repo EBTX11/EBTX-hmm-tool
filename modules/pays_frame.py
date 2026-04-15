@@ -2936,18 +2936,75 @@ class PaysFrame(ttk.Frame):
         if not sel:
             messagebox.showerror("Erreur", "Sélectionne une formation")
             return
-        name = self._mil_formations[sel[0]]["name"]
+
+        formation = self._mil_formations[sel[0]]
+        name  = formation["name"]
+        fpath = formation["file"]
+        tag   = self._mil_tag_var.get().strip().upper()
+        is_hmm = bool(re.match(r'^[A-Z]{2,4}_MILITARY_FORMATION_\d+$', name))
+
         if not messagebox.askyesno("Confirmer", f"Supprimer '{name}' ?"):
             return
-        tag = self._mil_manage_tag.get().strip().upper()
-        fpath = self._mil_get_file(tag)
+
+        if not os.path.exists(fpath):
+            messagebox.showerror("Erreur", "Fichier de formation introuvable")
+            return
+
         with open(fpath, "r", encoding="utf-8") as f:
             content = f.read()
-        content = re.sub(
-            rf'create_(?:army|navy)\s*=\s*\{{[^}}]*name\s*=\s*"{re.escape(name)}"[^}}]*\}}',
-            '', content, flags=re.DOTALL)
+
+        # ── Trouver et extraire le bloc create_military_formation ──
+        pattern = rf'create_military_formation\s*=\s*\{{[^{{]*?name\s*=\s*{re.escape(name)}'
+        m = re.search(pattern, content, re.DOTALL)
+        if not m:
+            messagebox.showerror("Erreur", f"Formation '{name}' introuvable dans le fichier")
+            return
+
+        start = m.start()
+        depth = 0
+        end = start
+        for i in range(start, len(content)):
+            if content[i] == '{':
+                depth += 1
+            elif content[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+
+        block = content[start:end]
+
+        # ── Supprimer le bloc (+ éventuelle ligne vide avant) ──
+        pre = content[:start].rstrip('\n')
+        content = pre + '\n' + content[end:]
+
         with open(fpath, "w", encoding="utf-8") as f:
             f.write(content)
+
+        # ── Si formation HMM : supprimer la localisation + ajuster bâtiment ──
+        if is_hmm:
+            # Localisation
+            mod = self.config.mod_path
+            if mod:
+                yml_path = os.path.join(mod, "localization", "english",
+                                        "00_hmm_military_formation_name_l_english.yml")
+                if os.path.exists(yml_path):
+                    with open(yml_path, "r", encoding="utf-8-sig") as f:
+                        loc = f.read()
+                    loc = re.sub(rf'^\s*{re.escape(name)}[^:\n]*:.*\n?', '', loc, flags=re.MULTILINE)
+                    with open(yml_path, "w", encoding="utf-8-sig") as f:
+                        f.write(loc)
+
+            # Bâtiment : soustraire les unités de la formation supprimée
+            total_units = self._mil_count_units_in_block(block)
+            state_m = re.search(r'state_region\s*=\s*s:(\w+)', block)
+            state   = state_m.group(1) if state_m else ""
+            ftype_m = re.search(r'\btype\s*=\s*(army|fleet)\b', block)
+            ftype   = ftype_m.group(1) if ftype_m else "army"
+            building_type = "building_barrack" if ftype == "army" else "building_naval_base"
+            if state and total_units > 0:
+                self._mil_create_or_update_building(tag, state, building_type, -total_units)
+
         self._mil_load_formations()
 
     # ── Gestion des bâtiments militaires ───────────────────────
