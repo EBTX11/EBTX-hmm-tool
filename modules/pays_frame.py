@@ -139,6 +139,7 @@ class PaysFrame(ttk.Frame):
             self._load_diplomacy_data()
         if hasattr(self, '_pb_tag_var'):
             self._pb_tag_var.set(tag)
+            self._pb_load_for_country(tag)
         if hasattr(self, '_mil_tag_var'):
             self._mil_tag_var.set(tag)
             self._mil_manage_tag.set(tag)
@@ -1177,7 +1178,7 @@ class PaysFrame(ttk.Frame):
         self._dipl_subj_type_var   = tk.StringVar(value="colony")
         _subj_types = ["colony", "puppet", "dominion", "protectorate",
                        "personal_union", "tributary", "vassal", "chartered_company"]
-        subj_form = ttk.Frame(subj_lf)
+        subj_form = ttk.LabelFrame(subj_lf, text="Add Subject Relationship", padding=(4, 4))
         subj_form.pack(fill="x", pady=(6, 0))
         ttk.Label(subj_form, text="Target:").pack(side="left")
         ttk.Entry(subj_form, textvariable=self._dipl_subj_target_var, width=6).pack(side="left", padx=2)
@@ -1201,7 +1202,7 @@ class PaysFrame(ttk.Frame):
         self._dipl_host_target_var = tk.StringVar()
         self._dipl_host_type_var   = tk.StringVar(value="rivalry")
         _hostile_types = ["rivalry", "embargo", "truce"]
-        host_form = ttk.Frame(host_lf)
+        host_form = ttk.LabelFrame(host_lf, text="Add Hostile/Truce/Embargo", padding=(4, 4))
         host_form.pack(fill="x", pady=(6, 0))
         ttk.Label(host_form, text="Target:").pack(side="left")
         ttk.Entry(host_form, textvariable=self._dipl_host_target_var, width=6).pack(side="left", padx=2)
@@ -1544,15 +1545,13 @@ class PaysFrame(ttk.Frame):
         nb.add(f, text="Power blocs")
 
         self._pb_tag_var    = tk.StringVar()
-        self._pb_key_var    = tk.StringVar()
-        self._pb_name_var   = tk.StringVar()
-        self._pb_adj_var    = tk.StringVar()
+        self._pb_key_var    = tk.StringVar()   # = name = POR_EMP dans le fichier
         self._pb_identity   = tk.StringVar()
         self._pb_date_var   = tk.StringVar(value="1836.1.1")
-        self._pb_leader_var = tk.StringVar()
+        self._pb_leader_var = tk.StringVar()   # = outer c:TAG
         self._pb_color_rgb  = [100, 100, 100]
-        self._pb_select_var = tk.StringVar()
-        self._pb_blocs      = {}   # key → bloc dict
+        self._pb_blocs      = {}   # name → bloc dict
+        self._pb_bloc_files = {}   # name → filepath
 
         # ── Barre du haut ──────────────────────────────────────
         top = ttk.Frame(f)
@@ -1561,11 +1560,6 @@ class PaysFrame(ttk.Frame):
         ttk.Label(top, text="Pays :").pack(side="left")
         ttk.Entry(top, textvariable=self._pb_tag_var, width=8, state="readonly",
                   font=("Segoe UI", 10, "bold")).pack(side="left", padx=(4, 8))
-        ttk.Label(top, text="OR Select Bloc:").pack(side="left")
-        self._pb_select_cb = ttk.Combobox(top, textvariable=self._pb_select_var,
-                                           state="readonly", width=24)
-        self._pb_select_cb.pack(side="left", padx=(4, 4))
-        self._pb_select_cb.bind("<<ComboboxSelected>>", self._pb_on_select)
         ttk.Button(top, text="Charger", command=self._pb_refresh_list).pack(side="left", padx=4)
         tk.Button(top, text="Sauvegarder", command=self._pb_save,
                   bg="#1a7a1a", fg="white", activebackground="#2a9e2a", activeforeground="white",
@@ -1580,84 +1574,77 @@ class PaysFrame(ttk.Frame):
         det.columnconfigure(3, weight=1)
 
         identities = [
-            "power_bloc_identity_hegemony",
-            "power_bloc_identity_trade_league",
-            "power_bloc_identity_defensive_pact",
-            "power_bloc_identity_customs_union",
-            "power_bloc_identity_sphere_of_influence",
-            "power_bloc_identity_ideological_union",
+            "identity_trade_league",
+            "identity_sovereign_empire",
+            "identity_ideological_union",
+            "identity_military_treaty_organization",
+            "identity_religious",
+            "identity_cultural",
         ]
 
-        ttk.Label(det, text="Key:", anchor="w").grid(row=0, column=0, sticky="w", padx=(0,6), pady=3)
+        ttk.Label(det, text="Name (bloc):", anchor="w").grid(row=0, column=0, sticky="w", padx=(0,6), pady=3)
         ttk.Entry(det, textvariable=self._pb_key_var).grid(row=0, column=1, sticky="ew", padx=(0,20), pady=3)
         ttk.Label(det, text="Identity:", anchor="w").grid(row=0, column=2, sticky="w", padx=(0,6), pady=3)
         ttk.Combobox(det, textvariable=self._pb_identity, values=identities,
-                     width=30).grid(row=0, column=3, sticky="ew", pady=3)
-
-        ttk.Label(det, text="Name:", anchor="w").grid(row=1, column=0, sticky="w", padx=(0,6), pady=3)
-        ttk.Entry(det, textvariable=self._pb_name_var).grid(row=1, column=1, sticky="ew", padx=(0,20), pady=3)
-        ttk.Label(det, text="Adjective:", anchor="w").grid(row=1, column=2, sticky="w", padx=(0,6), pady=3)
-        ttk.Entry(det, textvariable=self._pb_adj_var).grid(row=1, column=3, sticky="ew", pady=3)
+                     width=34, state="readonly").grid(row=0, column=3, sticky="ew", pady=3)
 
         color_row = ttk.Frame(det)
-        color_row.grid(row=2, column=0, columnspan=2, sticky="w", pady=3)
+        color_row.grid(row=1, column=0, columnspan=2, sticky="w", pady=3)
         ttk.Label(color_row, text="Color:", anchor="w").pack(side="left", padx=(0,6))
         self._pb_color_preview = tk.Label(color_row, width=5, bg="#646464", relief="solid", cursor="hand2")
         self._pb_color_preview.pack(side="left", padx=(0,6))
         self._pb_color_preview.bind("<Button-1>", self._pb_pick_color)
         ttk.Button(color_row, text="Pick Color", command=self._pb_pick_color).pack(side="left")
 
-        ttk.Label(det, text="Founding Date:", anchor="w").grid(row=3, column=0, sticky="w", padx=(0,6), pady=3)
-        ttk.Entry(det, textvariable=self._pb_date_var, width=12).grid(row=3, column=1, sticky="w", pady=3)
-        ttk.Label(det, text="Leader Tag:", anchor="w").grid(row=3, column=2, sticky="w", padx=(0,6), pady=3)
-        ttk.Entry(det, textvariable=self._pb_leader_var, width=10).grid(row=3, column=3, sticky="w", pady=3)
+        ttk.Label(det, text="Founding Date:", anchor="w").grid(row=2, column=0, sticky="w", padx=(0,6), pady=3)
+        ttk.Entry(det, textvariable=self._pb_date_var, width=12).grid(row=2, column=1, sticky="w", pady=3)
+        ttk.Label(det, text="Leader Tag:", anchor="w").grid(row=2, column=2, sticky="w", padx=(0,6), pady=3)
+        ttk.Entry(det, textvariable=self._pb_tag_var, width=10, state="readonly",
+                  font=("Segoe UI", 10, "bold")).grid(row=2, column=3, sticky="w", pady=3)
 
-        # ── Principles + Members côte à côte ───────────────────
-        mid = ttk.Frame(f)
-        mid.pack(fill="both", expand=True, padx=10, pady=(6, 4))
-        mid.columnconfigure(0, weight=3)
-        mid.columnconfigure(1, weight=2)
+        # ── Principle (un seul par bloc) ───────────────────────
+        prin_lf = ttk.LabelFrame(f, text="Principle", padding=(8, 6))
+        prin_lf.pack(fill="x", padx=10, pady=(6, 4))
 
-        # Principles (gauche)
-        prin_lf = ttk.LabelFrame(mid, text="Principles", padding=(6, 4))
-        prin_lf.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-
-        cols = ("principle", "level")
-        self._pb_tree = ttk.Treeview(prin_lf, columns=cols, show="headings", height=8)
-        self._pb_tree.heading("principle", text="Principle Key")
-        self._pb_tree.heading("level", text="Level")
-        self._pb_tree.column("principle", width=280)
-        self._pb_tree.column("level", width=60, anchor="center")
-        tree_sb = ttk.Scrollbar(prin_lf, command=self._pb_tree.yview)
-        self._pb_tree.configure(yscrollcommand=tree_sb.set)
-        self._pb_tree.pack(side="left", fill="both", expand=True)
-        tree_sb.pack(side="right", fill="y")
-
-        add_prin = ttk.Frame(prin_lf)
-        add_prin.pack(fill="x", pady=(4, 0))
-        ttk.Label(add_prin, text="Add:").pack(side="left")
-        principles = [
-            "pb_trade_policy_principle", "pb_military_principle",
-            "pb_diplomatic_principle", "pb_economic_principle",
-            "pb_cultural_principle", "pb_religious_principle",
-            "pb_colonial_principle", "pb_industrial_principle",
+        _principles = [
+            "principle_construction",
+            "principle_internal_trade",
+            "principle_market_unification",
+            "principle_vassalization",
+            "principle_advanced_research",
+            "principle_defensive_cooperation",
+            "principle_aggressive_coordination",
+            "principle_external_trade",
+            "principle_food_standardization",
+            "principle_police_coordination",
+            "principle_transport",
+            "principle_military_industry",
+            "principle_colonial_offices",
+            "principle_foreign_investment",
+            "principle_creative_legislature",
+            "principle_freedom_of_movement",
+            "principle_divine_economics",
+            "principle_exploit_members",
+            "principle_sacred_civics",
+            "principle_ideological_truth",
+            "principle_companies",
+            "principle_shared_canon",
         ]
         self._pb_prin_key = tk.StringVar()
         self._pb_prin_lvl = tk.StringVar(value="1")
-        ttk.Combobox(add_prin, textvariable=self._pb_prin_key, values=principles,
-                     width=26).pack(side="left", padx=3)
-        ttk.Combobox(add_prin, textvariable=self._pb_prin_lvl, values=["1","2","3","4","5"],
-                     width=4, state="readonly").pack(side="left", padx=3)
-        ttk.Button(add_prin, text="+", width=3,
-                   command=self._pb_add_principle).pack(side="left", padx=2)
-        ttk.Button(add_prin, text="Remove", command=self._pb_remove_principle).pack(side="right")
+        ttk.Label(prin_lf, text="Principle:").pack(side="left", padx=(0, 4))
+        ttk.Combobox(prin_lf, textvariable=self._pb_prin_key, values=_principles,
+                     width=34, state="readonly").pack(side="left", padx=(0, 12))
+        ttk.Label(prin_lf, text="Level:").pack(side="left", padx=(0, 4))
+        ttk.Combobox(prin_lf, textvariable=self._pb_prin_lvl, values=["1", "2", "3"],
+                     width=4, state="readonly").pack(side="left")
 
-        # Members (droite)
-        mem_lf = ttk.LabelFrame(mid, text="Members  (Subjects are automatically made members)",
+        # ── Members ────────────────────────────────────────────
+        mem_lf = ttk.LabelFrame(f, text="Members",
                                  padding=(6, 4))
-        mem_lf.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        mem_lf.pack(fill="x", padx=10, pady=(4, 4))
 
-        self._pb_members_lb = tk.Listbox(mem_lf, height=8, font=("Segoe UI", 9))
+        self._pb_members_lb = tk.Listbox(mem_lf, height=5, font=("Segoe UI", 9))
         mem_sb = ttk.Scrollbar(mem_lf, command=self._pb_members_lb.yview)
         self._pb_members_lb.configure(yscrollcommand=mem_sb.set)
         self._pb_members_lb.pack(side="left", fill="both", expand=True)
@@ -1672,6 +1659,18 @@ class PaysFrame(ttk.Frame):
         ttk.Button(add_mem, text="Remove",
                    command=self._pb_remove_member).pack(side="right")
 
+        # ── Power Blocs Existants ──────────────────────────────
+        blocs_lf = ttk.LabelFrame(f, text="Power Blocs Existants",
+                                   padding=(6, 4))
+        blocs_lf.pack(fill="x", padx=10, pady=(4, 4))
+
+        self._pb_blocs_lb = tk.Listbox(blocs_lf, height=4, font=("Segoe UI", 9))
+        blocs_sb = ttk.Scrollbar(blocs_lf, command=self._pb_blocs_lb.yview)
+        self._pb_blocs_lb.configure(yscrollcommand=blocs_sb.set)
+        self._pb_blocs_lb.pack(side="left", fill="both", expand=True)
+        blocs_sb.pack(side="right", fill="y")
+        self._pb_blocs_lb.bind("<<ListboxSelect>>", self._pb_on_bloc_list_select)
+
         # ── Boutons bas ────────────────────────────────────────
         bot = ttk.Frame(f)
         bot.pack(fill="x", padx=10, pady=(4, 10))
@@ -1684,26 +1683,44 @@ class PaysFrame(ttk.Frame):
 
     # ── Actions Power Blocs ────────────────────────────────────
 
-    def _pb_get_file(self):
+    def _pb_get_dir(self):
         mod = self.config.mod_path
         if not mod:
             return None
         path = os.path.join(mod, "common", "history", "power_blocs")
         os.makedirs(path, exist_ok=True)
-        return os.path.join(path, "00_hmm_power_blocs.txt")
+        return path
+
+    def _pb_load_localization(self):
+        """Load power bloc localization for name resolution"""
+        mod = self.config.mod_path
+        if not mod:
+            return {}
+        loc_path = os.path.join(mod, "localization", "english", "00_hmm_power_blocs_l_english.yml")
+        loc = {}
+        if os.path.exists(loc_path):
+            with open(loc_path, "r", encoding="utf-8-sig") as fh:
+                for line in fh:
+                    m = re.match(r'\s*(\w+):\s*"([^"]*)"', line)
+                    if m:
+                        loc[m.group(1)] = m.group(2)
+        return loc
 
     def _pb_parse_all(self):
-        fpath = self._pb_get_file()
         self._pb_blocs = {}
-        if not fpath or not os.path.exists(fpath):
+        self._pb_bloc_files = {}
+        pb_dir = self._pb_get_dir()
+        if not pb_dir or not os.path.exists(pb_dir):
             return
-        with open(fpath, "r", encoding="utf-8") as f:
-            content = f.read()
-        for m in re.finditer(r'(\w+)\s*=\s*\{', content):
-            key = m.group(1)
-            if key == "power_blocs":
-                continue
-            start = m.end()
+
+        # Load localization for name resolution
+        pb_loc = self._pb_load_localization()
+
+        def _get(pat, txt, default=""):
+            r = re.search(pat, txt)
+            return r.group(1).strip('"') if r else default
+
+        def _extract_block(content, start):
             depth = 1
             i = start
             while i < len(content) and depth > 0:
@@ -1712,60 +1729,132 @@ class PaysFrame(ttk.Frame):
                 elif content[i] == "}":
                     depth -= 1
                 i += 1
-            block = content[start:i-1]
-            def get(pat, txt, default=""):
-                r = re.search(pat, txt)
-                return r.group(1).strip('"') if r else default
-            r, g, b = 100, 100, 100
-            cm = re.search(r'color\s*=\s*\{[^\d]*(\d+)[^\d]+(\d+)[^\d]+(\d+)', block)
-            if cm:
-                r, g, b = int(cm.group(1)), int(cm.group(2)), int(cm.group(3))
-            principles = []
-            for pm in re.finditer(
-                r'set_principle\s*=\s*\{[^}]*principle\s*=\s*(\w+)[^}]*level\s*=\s*(\d+)[^}]*\}',
-                block, re.DOTALL
-            ):
-                principles.append((pm.group(1), pm.group(2)))
-            members = re.findall(r'members\s*=\s*\{([^}]*)\}', block)
-            member_list = []
-            if members:
-                member_list = [t.strip().lstrip("c:") for t in members[0].split() if t.strip()]
-            self._pb_blocs[key] = {
-                "identity":   get(r'identity\s*=\s*(\w+)', block),
-                "name":       get(r'name\s*=\s*"([^"]*)"', block),
-                "adjective":  get(r'adjective\s*=\s*"([^"]*)"', block),
-                "color":      [r, g, b],
-                "date":       get(r'founding_date\s*=\s*([\d.]+)', block, "1836.1.1"),
-                "leader":     get(r'leader\s*=\s*c:(\w+)', block),
-                "principles": principles,
-                "members":    member_list,
-            }
+            return content[start:i - 1]
+
+        for fname in os.listdir(pb_dir):
+            if not fname.endswith(".txt"):
+                continue
+            fpath = os.path.join(pb_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as fh:
+                    content = fh.read()
+            except Exception:
+                continue
+
+            for m in re.finditer(r'c:(\w+)\s*\?=\s*\{', content):
+                leader = m.group(1)
+                outer_block = _extract_block(content, m.end())
+
+                cbm = re.search(r'create_power_bloc\s*=\s*\{', outer_block)
+                if not cbm:
+                    continue
+                bloc_content = _extract_block(outer_block, cbm.end())
+
+                r, g, b = 100, 100, 100
+                cm = re.search(
+                    r'map_color\s*=\s*\{[^\d]*(\d+)[^\d]+(\d+)[^\d]+(\d+)', bloc_content)
+                if cm:
+                    r, g, b = int(cm.group(1)), int(cm.group(2)), int(cm.group(3))
+
+                principle_full = _get(r'principle\s*=\s*(\w+)', bloc_content)
+                prin_base, prin_lvl = principle_full, "1"
+                if principle_full:
+                    pm = re.match(r'(.+)_(\d+)$', principle_full)
+                    if pm:
+                        prin_base, prin_lvl = pm.group(1), pm.group(2)
+
+                member_list = re.findall(r'member\s*=\s*c:(\w+)', bloc_content)
+                # Get the localization key (e.g., TAG_POWER_BLOCS)
+                loc_key = _get(r'name\s*=\s*(\S+)', bloc_content)
+                
+                # Try to resolve the name from localization
+                display_name = pb_loc.get(loc_key, loc_key)
+                
+                # Use the leader as key if no loc_key found
+                key = loc_key if loc_key else leader
+
+                self._pb_blocs[key] = {
+                    "leader":    leader,
+                    "name":      display_name,  # Use resolved name for display
+                    "loc_key":   loc_key,       # Keep the localization key for reference
+                    "identity":  _get(r'identity\s*=\s*(\w+)', bloc_content),
+                    "color":     [r, g, b],
+                    "date":      _get(r'founding_date\s*=\s*([\d.]+)', bloc_content, "1836.1.1"),
+                    "prin_base": prin_base,
+                    "prin_lvl":  prin_lvl,
+                    "members":   member_list,
+                }
+                self._pb_bloc_files[key] = fpath
 
     def _pb_refresh_list(self):
         self._pb_parse_all()
-        keys = list(self._pb_blocs.keys())
-        self._pb_select_cb["values"] = keys
+        # Update the listbox with existing power blocs
+        self._pb_blocs_lb.delete(0, tk.END)
+        for key, b in self._pb_blocs.items():
+            display_text = f"{b['name']} (Leader: {b['leader']})"
+            self._pb_blocs_lb.insert(tk.END, display_text)
 
-    def _pb_on_select(self, event=None):
-        key = self._pb_select_var.get()
-        if key not in self._pb_blocs:
+    def _pb_on_bloc_list_select(self, event=None):
+        selection = self._pb_blocs_lb.curselection()
+        if not selection:
             return
-        b = self._pb_blocs[key]
-        self._pb_key_var.set(key)
-        self._pb_identity.set(b["identity"])
-        self._pb_name_var.set(b["name"])
-        self._pb_adj_var.set(b["adjective"])
-        self._pb_date_var.set(b["date"])
-        self._pb_leader_var.set(b["leader"])
-        self._pb_color_rgb = b["color"][:]
-        hex_c = "#{:02x}{:02x}{:02x}".format(*self._pb_color_rgb)
-        self._pb_color_preview.config(bg=hex_c)
-        self._pb_tree.delete(*self._pb_tree.get_children())
-        for principle, level in b["principles"]:
-            self._pb_tree.insert("", tk.END, values=(principle, level))
+        selected_text = self._pb_blocs_lb.get(selection[0])
+        # Extract bloc name from "NAME (Leader: TAG)"
+        match = re.search(r'^(.+?)\s*\(Leader:\s*(\w+)\)', selected_text)
+        if not match:
+            return
+        bloc_name = match.group(1)
+        leader_tag = match.group(2)
+        
+        # Find the bloc by name
+        for key, b in self._pb_blocs.items():
+            if b["name"] == bloc_name:
+                self._pb_key_var.set(b["name"])
+                self._pb_leader_var.set(b["leader"])
+                self._pb_tag_var.set(b["leader"])
+                self._pb_identity.set(b["identity"])
+                self._pb_date_var.set(b["date"])
+                self._pb_color_rgb = b["color"][:]
+                hex_c = "#{:02x}{:02x}{:02x}".format(*self._pb_color_rgb)
+                self._pb_color_preview.config(bg=hex_c)
+                self._pb_prin_key.set(b["prin_base"])
+                self._pb_prin_lvl.set(b["prin_lvl"])
+                self._pb_members_lb.delete(0, tk.END)
+                for tag in b["members"]:
+                    self._pb_members_lb.insert(tk.END, tag)
+                break
+
+    def _pb_load_for_country(self, tag):
+        """Load power bloc data for a country if it leads a bloc"""
+        self._pb_parse_all()
+        for key, b in self._pb_blocs.items():
+            if b["leader"].upper() == tag.upper():
+                self._pb_key_var.set(b["name"])
+                self._pb_leader_var.set(b["leader"])
+                self._pb_tag_var.set(b["leader"])
+                self._pb_identity.set(b["identity"])
+                self._pb_date_var.set(b["date"])
+                self._pb_color_rgb = b["color"][:]
+                hex_c = "#{:02x}{:02x}{:02x}".format(*self._pb_color_rgb)
+                self._pb_color_preview.config(bg=hex_c)
+                self._pb_prin_key.set(b["prin_base"])
+                self._pb_prin_lvl.set(b["prin_lvl"])
+                self._pb_members_lb.delete(0, tk.END)
+                for member_tag in b["members"]:
+                    self._pb_members_lb.insert(tk.END, member_tag)
+                return True
+        # No bloc found for this country - clear fields
+        self._pb_key_var.set("")
+        self._pb_leader_var.set("")
+        self._pb_tag_var.set(tag)
+        self._pb_identity.set("")
+        self._pb_date_var.set("1836.1.1")
+        self._pb_color_rgb = [100, 100, 100]
+        self._pb_color_preview.config(bg="#646464")
+        self._pb_prin_key.set("")
+        self._pb_prin_lvl.set("1")
         self._pb_members_lb.delete(0, tk.END)
-        for tag in b["members"]:
-            self._pb_members_lb.insert(tk.END, tag)
+        return False
 
     def _pb_pick_color(self, event=None):
         r, g, b = self._pb_color_rgb
@@ -1773,17 +1862,6 @@ class PaysFrame(ttk.Frame):
         if result and result[0]:
             self._pb_color_rgb = [int(x) for x in result[0]]
             self._pb_color_preview.config(bg="#{:02x}{:02x}{:02x}".format(*self._pb_color_rgb))
-
-    def _pb_add_principle(self):
-        key = self._pb_prin_key.get().strip()
-        lvl = self._pb_prin_lvl.get().strip()
-        if key:
-            self._pb_tree.insert("", tk.END, values=(key, lvl))
-
-    def _pb_remove_principle(self):
-        sel = self._pb_tree.selection()
-        if sel:
-            self._pb_tree.delete(sel[0])
 
     def _pb_add_member(self):
         tag = self._pb_mem_tag.get().strip().upper()
@@ -1797,73 +1875,148 @@ class PaysFrame(ttk.Frame):
             self._pb_members_lb.delete(sel[0])
 
     def _pb_save(self):
-        key = self._pb_key_var.get().strip()
-        if not key:
-            messagebox.showerror("Erreur", "Entre une Key pour le bloc")
+        name = self._pb_key_var.get().strip()    # ex. "Empire Portuguese"
+        leader = self._pb_tag_var.get().strip().upper()  # Use selected country tag
+        if not name or not leader:
+            messagebox.showerror("Erreur", "Sélectionne un pays et entre un nom de bloc")
             return
-        fpath = self._pb_get_file()
-        if not fpath:
+        pb_dir = self._pb_get_dir()
+        if not pb_dir:
             messagebox.showerror("Erreur", "Configure le dossier mod d'abord")
             return
 
+        # Generate localization key: TAG_POWER_BLOCS
+        bloc_key = f"{leader}_POWER_BLOCS"
+
         r, g, b = self._pb_color_rgb
-        principles_str = ""
-        for iid in self._pb_tree.get_children():
-            p, l = self._pb_tree.item(iid, "values")
-            principles_str += f"\n\t\tset_principle = {{ principle = {p} level = {l} }}"
+        prin_base = self._pb_prin_key.get().strip()
+        prin_lvl  = self._pb_prin_lvl.get().strip() or "1"
+        principle_str = f"{prin_base}_{prin_lvl}" if prin_base else ""
 
         members = list(self._pb_members_lb.get(0, tk.END))
-        members_str = " ".join(f"c:{t}" for t in members)
+        members_lines = "".join(f"\t\t\tmember = c:{t}\n" for t in members)
 
-        leader = self._pb_leader_var.get().strip()
+        # Use localization key for name
         bloc_block = (
-            f'\t{key} = {{\n'
-            f'\t\tidentity = {self._pb_identity.get()}\n'
-            f'\t\tname = "{self._pb_name_var.get()}"\n'
-            f'\t\tadjective = "{self._pb_adj_var.get()}"\n'
-            f'\t\tcolor = {{ {r} {g} {b} }}\n'
-            f'\t\tfounding_date = {self._pb_date_var.get()}\n'
-            f'\t\tleader = c:{leader}\n'
-            f'{principles_str}\n'
-            f'\t\tmembers = {{ {members_str} }}\n'
+            f'\tc:{leader} ?= {{\n'
+            f'\t\tcreate_power_bloc = {{\n'
+            f'\t\t\tname = {bloc_key}\n'
+            f'\t\t\tmap_color = {{ {r} {g} {b} }}\n'
+            f'\t\t\tfounding_date = {self._pb_date_var.get()}\n'
+            f'\t\t\tidentity = {self._pb_identity.get()}\n'
+            f'\t\t\tprinciple = {principle_str}\n'
+            f'{members_lines}'
+            f'\t\t}}\n'
             f'\t}}\n'
         )
 
-        if os.path.exists(fpath):
-            with open(fpath, "r", encoding="utf-8") as f:
-                content = f.read()
-            content = re.sub(
-                rf'\t{key}\s*=\s*\{{[^}}]*(?:\{{[^}}]*\}}[^}}]*)*\}}',
-                bloc_block.rstrip("\n"), content, flags=re.DOTALL)
-            if key not in content:
-                content = content.rstrip().rstrip("}").rstrip() + f"\n{bloc_block}}}\n"
+        # Fichier cible : celui qui contenait déjà ce bloc, sinon fichier par défaut
+        if bloc_key in self._pb_bloc_files:
+            fpath = self._pb_bloc_files[bloc_key]
         else:
-            content = f"power_blocs = {{\n{bloc_block}}}\n"
+            fpath = os.path.join(pb_dir, "00_hmm_power_blocs.txt")
 
-        with open(fpath, "w", encoding="utf-8") as f:
-            f.write(content)
+        if os.path.exists(fpath):
+            with open(fpath, "r", encoding="utf-8") as fh:
+                content = fh.read()
+            
+            # Check if POWER_BLOCS = { exists
+            if "POWER_BLOCS = {" in content:
+                # Insert inside POWER_BLOCS block
+                match = re.search(r'(POWER_BLOCS\s*=\s*\{)', content)
+                if match:
+                    insert_pos = match.end()
+                    content = content[:insert_pos] + bloc_block + content[insert_pos:]
+            else:
+                # Replace existing bloc or add new one
+                new_content = re.sub(
+                    rf'c:{re.escape(leader)}\s*\?=\s*\{{[^{{}}]*(?:\{{[^{{}}]*\}}[^{{}}]*)*\}}',
+                    bloc_block.strip("\n"), content, flags=re.DOTALL)
+                if new_content == content:
+                    # No existing bloc found - wrap in POWER_BLOCS
+                    content = f"POWER_BLOCS = {{\n{bloc_block}}}\n"
+                else:
+                    content = new_content
+        else:
+            # Create new file with POWER_BLOCS wrapper
+            content = f"POWER_BLOCS = {{\n{bloc_block}}}\n"
+
+        with open(fpath, "w", encoding="utf-8") as fh:
+            fh.write(content)
+
+        # Update localization file
+        self._pb_update_localization(bloc_key, name)
 
         self._pb_refresh_list()
-        messagebox.showinfo("OK", f"Bloc '{key}' sauvegardé !")
+        messagebox.showinfo("OK", f"Bloc '{name}' sauvegardé !")
+
+    def _pb_update_localization(self, bloc_key, display_name):
+        """Update the localization file with the power bloc name"""
+        mod = self.config.mod_path
+        if not mod:
+            return
+        
+        loc_dir = os.path.join(mod, "localization", "english")
+        loc_path = os.path.join(loc_dir, "00_hmm_power_blocs_l_english.yml")
+        os.makedirs(loc_dir, exist_ok=True)
+        
+        # Read existing content or create new file
+        if os.path.exists(loc_path):
+            with open(loc_path, "r", encoding="utf-8-sig") as fh:
+                content = fh.read()
+        else:
+            content = "l_english:\n"
+        
+        # Escape special characters for YAML
+        escaped_name = display_name.replace("\\", "\\\\").replace('"', '\\"')
+        
+        # Check if entry exists and update it, or add new entry
+        key_pattern = rf'^\s*{re.escape(bloc_key)}:0\s+".*"$'
+        adj_key = f"{bloc_key}_adj"
+        adj_pattern = rf'^\s*{re.escape(adj_key)}:0\s+".*"$'
+        
+        if re.search(key_pattern, content, re.MULTILINE):
+            # Update existing entry
+            content = re.sub(
+                key_pattern,
+                f' {bloc_key}:0 "{escaped_name}"',
+                content,
+                flags=re.MULTILINE
+            )
+        else:
+            # Add new entry
+            if not content.endswith("\n"):
+                content += "\n"
+            content += f" {bloc_key}:0 \"{escaped_name}\"\n"
+        
+        # Add or update _adj entry (empty by default)
+        if not re.search(adj_pattern, content, re.MULTILINE):
+            if not content.endswith("\n"):
+                content += "\n"
+            content += f" {adj_key}:0 \"\"\n"
+        
+        with open(loc_path, "w", encoding="utf-8-sig") as fh:
+            fh.write(content)
 
     def _pb_remove_bloc(self):
-        key = self._pb_key_var.get().strip()
-        if not key:
+        name = self._pb_key_var.get().strip()
+        leader = self._pb_leader_var.get().strip().upper()
+        if not name or name not in self._pb_bloc_files:
             return
-        fpath = self._pb_get_file()
-        if not fpath or not os.path.exists(fpath):
+        fpath = self._pb_bloc_files[name]
+        if not os.path.exists(fpath):
             return
-        if not messagebox.askyesno("Confirmer", f"Supprimer le bloc '{key}' ?"):
+        if not messagebox.askyesno("Confirmer", f"Supprimer le bloc '{name}' ?"):
             return
-        with open(fpath, "r", encoding="utf-8") as f:
-            content = f.read()
+        with open(fpath, "r", encoding="utf-8") as fh:
+            content = fh.read()
         content = re.sub(
-            rf'\t{key}\s*=\s*\{{[^}}]*(?:\{{[^}}]*\}}[^}}]*)*\}}',
+            rf'c:{re.escape(leader)}\s*\?=\s*\{{[^{{}}]*(?:\{{[^{{}}]*\}}[^{{}}]*)*\}}',
             '', content, flags=re.DOTALL)
-        with open(fpath, "w", encoding="utf-8") as f:
-            f.write(content)
+        with open(fpath, "w", encoding="utf-8") as fh:
+            fh.write(content)
         self._pb_refresh_list()
-        messagebox.showinfo("OK", f"Bloc '{key}' supprimé")
+        messagebox.showinfo("OK", f"Bloc '{name}' supprimé")
 
     def _tab_military_formation(self, nb):
         f = ttk.Frame(nb)
