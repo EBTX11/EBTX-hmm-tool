@@ -54,7 +54,6 @@ class PaysFrame(ttk.Frame):
         self._tab_diplomacy(nb)
         self._tab_power_blocs(nb)
         self._tab_military_formation(nb)
-        self._tab_character(nb)
     # ---------------- SIDEBAR ----------------
 
     def _build_country_sidebar(self, parent):
@@ -120,9 +119,9 @@ class PaysFrame(ttk.Frame):
             return
 
         selected_text = self._country_listbox.get(selection[0])
-        match = re.search(r'\(([A-Z]{3})\)', selected_text)
+        match = re.search(r'\(([A-Za-z0-9]{2,4})\)', selected_text)
         if match:
-            self._selected_country_tag = match.group(1)
+            self._selected_country_tag = match.group(1).upper()
             self._fill_tag_in_tabs(self._selected_country_tag)
 
     def _fill_tag_in_tabs(self, tag):
@@ -138,6 +137,12 @@ class PaysFrame(ttk.Frame):
         if hasattr(self, '_dipl_tag_var'):
             self._dipl_tag_var.set(tag)
             self._load_diplomacy_data()
+        if hasattr(self, '_pb_tag_var'):
+            self._pb_tag_var.set(tag)
+        if hasattr(self, '_mil_tag_var'):
+            self._mil_tag_var.set(tag)
+            self._mil_manage_tag.set(tag)
+            self._mil_load_formations()
 
     # ---------------- HELPERS DONNÉES ----------------
 
@@ -156,6 +161,23 @@ class PaysFrame(ttk.Frame):
         with open(path, "r", encoding="utf-8-sig") as f:
             content = f.read()
         return sorted(re.findall(r'^(\w+)\s*=\s*\{', content, re.MULTILINE))
+
+    def _def_block_indices(self, content, tag):
+        """Retourne (tag_start, tag_end, inner_start, inner_end) pour le bloc TAG = { ... }.
+        Utilise un comptage de braces pour gérer n'importe quel niveau d'imbrication."""
+        m = re.search(rf'(?<![a-zA-Z0-9_]){re.escape(tag)}\s*\??\s*=\s*\{{', content)
+        if not m:
+            return None
+        brace_open = m.end() - 1
+        depth = 0
+        for i in range(brace_open, len(content)):
+            if content[i] == '{':
+                depth += 1
+            elif content[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    return (m.start(), i + 1, brace_open + 1, i)
+        return None
 
     def _ensure_law_groups(self):
         if not hasattr(self, '_law_groups') or not self._law_groups:
@@ -187,6 +209,8 @@ class PaysFrame(ttk.Frame):
         self._gen_tag_var   = tk.StringVar()
         self._gen_name      = tk.StringVar()
         self._gen_adj       = tk.StringVar()
+        self._gen_dyn_name  = tk.StringVar()
+        self._gen_dyn_adj   = tk.StringVar()
         self._gen_capital   = tk.StringVar()
         self._gen_tier      = tk.StringVar(value="kingdom")
         self._gen_type      = tk.StringVar(value="recognized")
@@ -197,6 +221,8 @@ class PaysFrame(ttk.Frame):
         self._gen_power     = tk.StringVar()
         self._gen_ruler_first    = tk.StringVar()
         self._gen_ruler_last     = tk.StringVar()
+        self._gen_ruler_culture  = tk.StringVar()
+        self._gen_ruler_birth    = tk.StringVar()
         self._gen_ruler_ig       = tk.StringVar()
         self._gen_ruler_ideology = tk.StringVar()
         self._gen_ruler_female   = tk.BooleanVar(value=False)
@@ -212,7 +238,9 @@ class PaysFrame(ttk.Frame):
         ttk.Button(top, text="Charger", command=self._load_general_data).pack(side="left", padx=3)
         self._gen_status = ttk.Label(top, text="Sélectionne un pays dans la liste", foreground="#888")
         self._gen_status.pack(side="left", padx=10)
-        ttk.Button(top, text="Sauvegarder", command=self._save_general_data).pack(side="right", padx=5)
+        tk.Button(top, text="Sauvegarder", command=self._save_general_data,
+                  bg="#1a7a1a", fg="white", activebackground="#2a9e2a", activeforeground="white",
+                  relief="flat", padx=10, pady=3).pack(side="right", padx=5)
 
         ttk.Separator(f, orient="horizontal").pack(fill="x", padx=10, pady=(4, 0))
 
@@ -251,13 +279,27 @@ class PaysFrame(ttk.Frame):
         ttk.Combobox(s1, textvariable=self._gen_type, state="readonly",
                      values=["recognized", "unrecognized", "colonial", "decentralized"]).grid(row=1, column=3, sticky="ew", pady=4)
 
+        ttk.Label(s1, text="Capital State:", anchor="w").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=4)
+        ttk.Entry(s1, textvariable=self._gen_capital).grid(row=2, column=1, columnspan=3, sticky="ew", pady=4)
+
         color_row = ttk.Frame(s1)
-        color_row.grid(row=2, column=0, columnspan=4, sticky="w", pady=4)
+        color_row.grid(row=3, column=0, columnspan=4, sticky="w", pady=4)
         ttk.Label(color_row, text="Color:", anchor="w").pack(side="left", padx=(0, 6))
         self._gen_color_preview = tk.Label(color_row, width=5, bg="#646464", relief="solid", cursor="hand2")
         self._gen_color_preview.pack(side="left", padx=(0, 6))
         self._gen_color_preview.bind("<Button-1>", self._pick_color)
         ttk.Button(color_row, text="Color Picker", command=self._pick_color).pack(side="left")
+
+        # ── Country Dynamic Name ───────────────────────────────
+        s1_dyn = ttk.LabelFrame(gi, text="Country Dynamic Name", padding=(10, 6))
+        s1_dyn.pack(fill="x", padx=10, pady=4)
+        s1_dyn.columnconfigure(1, weight=1)
+        s1_dyn.columnconfigure(3, weight=1)
+
+        ttk.Label(s1_dyn, text="Name:", anchor="w").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=4)
+        ttk.Entry(s1_dyn, textvariable=self._gen_dyn_name).grid(row=0, column=1, sticky="ew", padx=(0, 20), pady=4)
+        ttk.Label(s1_dyn, text="Adjective:", anchor="w").grid(row=0, column=2, sticky="w", padx=(0, 6), pady=4)
+        ttk.Entry(s1_dyn, textvariable=self._gen_dyn_adj).grid(row=0, column=3, sticky="ew", pady=4)
 
         # ── Culture & Religion ─────────────────────────────────
         s2 = ttk.LabelFrame(gi, text="Culture & Religion", padding=(10, 6))
@@ -316,8 +358,6 @@ class PaysFrame(ttk.Frame):
                 ttk.Combobox(s3, textvariable=var, values=law_values(group),
                              state="readonly").grid(row=actual_row, column=1, sticky="ew", padx=(0, 10), pady=4)
 
-        ttk.Label(s3, text="Capital State:", anchor="w").grid(row=3, column=0, sticky="w", padx=(0, 6), pady=4)
-        ttk.Entry(s3, textvariable=self._gen_capital).grid(row=3, column=1, columnspan=3, sticky="ew", pady=4)
 
         # ── Ruler Designer ─────────────────────────────────────
         s4 = ttk.LabelFrame(gi, text="Ruler Designer", padding=(10, 6))
@@ -330,13 +370,50 @@ class PaysFrame(ttk.Frame):
         ttk.Label(s4, text="Last Name:", anchor="w").grid(row=0, column=2, sticky="w", padx=(0, 6), pady=4)
         ttk.Entry(s4, textvariable=self._gen_ruler_last).grid(row=0, column=3, sticky="ew", pady=4)
 
-        ttk.Label(s4, text="Interest Group:", anchor="w").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=4)
-        ttk.Entry(s4, textvariable=self._gen_ruler_ig).grid(row=1, column=1, sticky="ew", padx=(0, 20), pady=4)
-        ttk.Label(s4, text="Ideology:", anchor="w").grid(row=1, column=2, sticky="w", padx=(0, 6), pady=4)
-        ttk.Entry(s4, textvariable=self._gen_ruler_ideology).grid(row=1, column=3, sticky="ew", pady=4)
+        ttk.Label(s4, text="Culture:", anchor="w").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=4)
+        cult_e = ttk.Entry(s4, textvariable=self._gen_ruler_culture)
+        cult_e.grid(row=1, column=1, sticky="ew", padx=(0, 20), pady=4)
+        cult_e.insert(0, "primary_culture")
+        ttk.Label(s4, text="Birth Date:", anchor="w").grid(row=1, column=2, sticky="w", padx=(0, 6), pady=4)
+        bd_e = ttk.Entry(s4, textvariable=self._gen_ruler_birth)
+        bd_e.grid(row=1, column=3, sticky="ew", pady=4)
+        bd_e.insert(0, "YYYY.MM.JJ")
 
-        ttk.Checkbutton(s4, text="Female", variable=self._gen_ruler_female).grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Label(s4, text="Interest Group:", anchor="w").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=4)
+        ttk.Entry(s4, textvariable=self._gen_ruler_ig).grid(row=2, column=1, sticky="ew", padx=(0, 20), pady=4)
+        ttk.Label(s4, text="Ideology:", anchor="w").grid(row=2, column=2, sticky="w", padx=(0, 6), pady=4)
+        ttk.Entry(s4, textvariable=self._gen_ruler_ideology).grid(row=2, column=3, sticky="ew", pady=4)
+
+        ruler_bot = ttk.Frame(s4)
+        ruler_bot.grid(row=3, column=0, columnspan=4, sticky="w", pady=(4, 2))
+        ttk.Checkbutton(ruler_bot, text="Female", variable=self._gen_ruler_female).pack(side="left", padx=(0, 20))
+        tk.Button(ruler_bot, text="Créer le Ruler", command=self._create_ruler,
+                  bg="#1a7a1a", fg="white", activebackground="#2a9e2a", activeforeground="white",
+                  relief="flat", padx=10, pady=3).pack(side="left")
+        ttk.Button(ruler_bot, text="Supprimer sélection",
+                   command=self._delete_ruler).pack(side="left", padx=(10, 0))
+
+        # ── Viewer des rulers existants ────────────────────────
+        viewer_frame = ttk.Frame(s4)
+        viewer_frame.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(8, 2))
+
+        ttk.Label(viewer_frame, text="Rulers existants pour ce pays :",
+                  font=("Segoe UI", 8, "bold")).pack(anchor="w")
+
+        tree_wrap = ttk.Frame(viewer_frame)
+        tree_wrap.pack(fill="x")
+
+        cols = ("template", "nom")
+        self._ruler_tree = ttk.Treeview(tree_wrap, columns=cols, show="headings", height=4)
+        self._ruler_tree.heading("template", text="Template")
+        self._ruler_tree.heading("nom",      text="Nom complet")
+        self._ruler_tree.column("template", width=280)
+        self._ruler_tree.column("nom",      width=160)
+        ruler_vsb = ttk.Scrollbar(tree_wrap, orient="vertical", command=self._ruler_tree.yview)
+        self._ruler_tree.configure(yscrollcommand=ruler_vsb.set)
+        self._ruler_tree.pack(side="left", fill="x", expand=True)
+        ruler_vsb.pack(side="right", fill="y")
+        self._ruler_tree.bind("<<TreeviewSelect>>", self._on_ruler_select)
 
         # ── Population Settings ────────────────────────────────
         s5 = ttk.LabelFrame(gi, text="Population Settings", padding=(10, 6))
@@ -390,45 +467,60 @@ class PaysFrame(ttk.Frame):
             return
 
         # ── Localisation ──
+        self._gen_name.set("")
+        self._gen_adj.set("")
+        self._gen_dyn_name.set("")
+        self._gen_dyn_adj.set("")
+        self._gen_religion.set("")
         loc_path = os.path.join(mod, "localization", "english", "00_hmm_countries_l_english.yml")
         if os.path.exists(loc_path):
             with open(loc_path, "r", encoding="utf-8-sig") as f:
                 loc = f.read()
-            m = re.search(rf'^\s*{tag}:0\s+"([^"]*)"', loc, re.MULTILINE)
+            m = re.search(rf'^\s*{re.escape(tag)}:0\s+"([^"]*)"', loc, re.MULTILINE)
             if m:
                 self._gen_name.set(m.group(1))
-            m = re.search(rf'^\s*{tag}_ADJ:0\s+"([^"]*)"', loc, re.MULTILINE)
+            m = re.search(rf'^\s*{re.escape(tag)}_ADJ:0\s+"([^"]*)"', loc, re.MULTILINE)
             if m:
                 self._gen_adj.set(m.group(1))
+                self._gen_dyn_adj.set(m.group(1))
+            m = re.search(rf'^\s*{re.escape(f"dyn_c_{tag}_01")}:0\s+"([^"]*)"', loc, re.MULTILINE)
+            if m:
+                self._gen_dyn_name.set(m.group(1))
 
         # ── Country Definition ──
         def_dir = os.path.join(mod, "common", "country_definitions")
         if os.path.exists(def_dir):
-            for fname in os.listdir(def_dir):
+            for fname in sorted(os.listdir(def_dir)):
                 fpath = os.path.join(def_dir, fname)
                 with open(fpath, "r", encoding="utf-8-sig") as f:
                     content = f.read()
-                m = re.search(rf'\b{tag}\s*=\s*{{([^}}]*(?:{{[^}}]*}}[^}}]*)*)}}', content, re.DOTALL)
-                if m:
-                    block = m.group(1)
-                    cm = re.search(r'color\s*=\s*\{[^\d]*(\d+)[^\d]+(\d+)[^\d]+(\d+)', block)
+                indices = self._def_block_indices(content, tag)
+                if indices:
+                    _, _, inner_s, inner_e = indices
+                    block = content[inner_s:inner_e]
+                    # color = seulement (pas primary_unit_color etc.)
+                    cm = re.search(r'(?<![_a-zA-Z])color\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)', block)
                     if cm:
                         self._gen_color_rgb = [int(cm.group(i)) for i in range(1, 4)]
-                        hex_col = "#{:02x}{:02x}{:02x}".format(*self._gen_color_rgb)
-                        self._gen_color_preview.config(bg=hex_col)
-                    tm = re.search(r'tier\s*=\s*(\w+)', block)
-                    if tm:
-                        self._gen_tier.set(tm.group(1))
-                    ctm = re.search(r'country_type\s*=\s*(\w+)', block)
-                    if ctm:
-                        self._gen_type.set(ctm.group(1))
-                    capm = re.search(r'capital\s*=\s*(\w+)', block)
+                        self._gen_color_preview.config(
+                            bg="#{:02x}{:02x}{:02x}".format(*self._gen_color_rgb))
+                    for attr, var in [('tier', self._gen_tier), ('country_type', self._gen_type)]:
+                        m2 = re.search(rf'{attr}\s*=\s*(\w+)', block)
+                        if m2:
+                            var.set(m2.group(1))
+                    # capital — valeur simple (STATE_xxx)
+                    capm = re.search(r'(?<!\w)capital\s*=\s*([\w]+)', block)
                     if capm:
                         self._gen_capital.set(capm.group(1))
-                    cults = re.findall(r'cultures\s*=\s*\{([^}]*)\}', block)
+                    # religion
+                    rm = re.search(r'(?<!\w)religion\s*=\s*(\w+)', block)
+                    if rm:
+                        self._gen_religion.set(rm.group(1))
+                    # cultures
+                    cults = re.search(r'cultures\s*=\s*\{([^}]*)\}', block)
                     if cults:
                         self._gen_cultures_lb.delete(0, tk.END)
-                        for c in cults[0].split():
+                        for c in cults.group(1).split():
                             self._gen_cultures_lb.insert(tk.END, c)
                     break
 
@@ -450,11 +542,9 @@ class PaysFrame(ttk.Frame):
                         for group, var in pol_map.items():
                             if law in self._law_groups.get(group, []):
                                 var.set(law)
-                    rm = re.search(r'set_state_religion\s*=\s*(?:religion:)?(\w+)', content)
-                    if rm:
-                        self._gen_religion.set(rm.group(1))
                     break
 
+        self._refresh_ruler_viewer()
         self._gen_status.config(text=f"Chargé : {tag}", foreground="#6af")
 
     def _save_general_data(self):
@@ -465,42 +555,101 @@ class PaysFrame(ttk.Frame):
             return
 
         # ── Localisation ──
-        loc_path = os.path.join(mod, "localization", "english", "00_hmm_countries_l_english.yml")
+        loc_dir = os.path.join(mod, "localization", "english")
+        loc_path = os.path.join(loc_dir, "00_hmm_countries_l_english.yml")
+        os.makedirs(loc_dir, exist_ok=True)
+
         if os.path.exists(loc_path):
             with open(loc_path, "r", encoding="utf-8-sig") as f:
                 loc = f.read()
-            name = self._gen_name.get().strip()
-            adj  = self._gen_adj.get().strip()
-            if name:
-                loc = re.sub(rf'(\s*{tag}:0\s+")[^"]*(")', rf'\g<1>{name}\2', loc)
-            if adj:
-                loc = re.sub(rf'(\s*{tag}_ADJ:0\s+")[^"]*(")', rf'\g<1>{adj}\2', loc)
-            with open(loc_path, "w", encoding="utf-8-sig") as f:
-                f.write(loc)
+        else:
+            loc = "l_english:\n\n"
+
+        def _escape_loc_value(value):
+            return value.replace("\\", "\\\\").replace('"', '\\"')
+
+        def _upsert_loc_entry(text, key, value, prefix=""):
+            if not value:
+                return text
+            value = _escape_loc_value(value)
+            pattern = rf'^(\s*{re.escape(key)}:0\s+")[^"]*(".*)$'
+            if re.search(pattern, text, re.MULTILINE):
+                return re.sub(pattern, lambda m: f'{m.group(1)}{value}{m.group(2)}', text, flags=re.MULTILINE)
+            if text and not text.endswith("\n"):
+                text += "\n"
+            return text + f'{prefix}{key}:0 "{value}"\n'
+
+        name = self._gen_name.get().strip()
+        adj = self._gen_adj.get().strip()
+        dyn_name = self._gen_dyn_name.get().strip()
+        dyn_adj = self._gen_dyn_adj.get().strip()
+        dyn_key = f"dyn_c_{tag}_01"
+
+        loc = _upsert_loc_entry(loc, tag, name)
+        loc = _upsert_loc_entry(loc, dyn_key, dyn_name, prefix="\t")
+
+        adj_value = adj if adj else dyn_adj
+        loc = _upsert_loc_entry(loc, f"{tag}_ADJ", adj_value)
+
+        with open(loc_path, "w", encoding="utf-8-sig") as f:
+            f.write(loc)
 
         # ── Country Definition ──
         def_dir = os.path.join(mod, "common", "country_definitions")
         if os.path.exists(def_dir):
-            for fname in os.listdir(def_dir):
+            for fname in sorted(os.listdir(def_dir)):
                 fpath = os.path.join(def_dir, fname)
                 with open(fpath, "r", encoding="utf-8-sig") as f:
                     content = f.read()
-                if re.search(rf'\b{tag}\s*=\s*{{', content):
-                    r, g, b = self._gen_color_rgb
-                    content = re.sub(
-                        rf'({tag}\s*=\s*{{[^}}]*color\s*=\s*{{)[^}}]*(}})',
-                        rf'\g<1> {r} {g} {b} \2', content, flags=re.DOTALL)
-                    content = re.sub(rf'(tier\s*=\s*)\w+', rf'\g<1>{self._gen_tier.get()}', content)
-                    content = re.sub(rf'(country_type\s*=\s*)\w+', rf'\g<1>{self._gen_type.get()}', content)
-                    content = re.sub(rf'(capital\s*=\s*)\w+', rf'\g<1>{self._gen_capital.get()}', content)
-                    cults = list(self._gen_cultures_lb.get(0, tk.END))
-                    if cults:
-                        content = re.sub(
-                            r'(cultures\s*=\s*\{)[^}]*(\})',
-                            rf'\g<1> {" ".join(cults)} \2', content)
-                    with open(fpath, "w", encoding="utf-8-sig") as f:
-                        f.write(content)
-                    break
+                indices = self._def_block_indices(content, tag)
+                if not indices:
+                    continue
+                _, _, inner_s, inner_e = indices
+                block = content[inner_s:inner_e]
+
+                # color (pas primary_unit_color etc.)
+                r, g, b = self._gen_color_rgb
+                block = re.sub(
+                    r'(?<![_a-zA-Z])(color\s*=\s*\{)[^}]*(\})',
+                    rf'\g<1> {r} {g} {b} \2', block, count=1)
+
+                # tier, country_type — uniquement dans ce bloc
+                block = re.sub(r'(tier\s*=\s*)\w+',
+                                rf'\g<1>{self._gen_tier.get()}', block, count=1)
+                block = re.sub(r'(country_type\s*=\s*)\w+',
+                                rf'\g<1>{self._gen_type.get()}', block, count=1)
+
+                # capital
+                capital = self._gen_capital.get().strip()
+                if capital:
+                    if re.search(r'(?<!\w)capital\s*=\s*\w+', block):
+                        block = re.sub(r'((?<!\w)capital\s*=\s*)\w+',
+                                       rf'\g<1>{capital}', block, count=1)
+                    else:
+                        block = block.rstrip() + f'\n    capital = {capital}\n'
+
+                # religion
+                religion = self._gen_religion.get().strip()
+                if religion:
+                    if re.search(r'(?<!\w)religion\s*=\s*\w+', block):
+                        block = re.sub(r'((?<!\w)religion\s*=\s*)\w+',
+                                       rf'\g<1>{religion}', block, count=1)
+                    else:
+                        block = block.rstrip() + f'\n    religion = {religion}\n'
+
+                # cultures
+                cults = list(self._gen_cultures_lb.get(0, tk.END))
+                if cults:
+                    if re.search(r'cultures\s*=\s*\{[^}]*\}', block):
+                        block = re.sub(r'(cultures\s*=\s*\{)[^}]*(\})',
+                                       rf'\g<1> {" ".join(cults)} \2', block, count=1)
+                    else:
+                        block = block.rstrip() + f'\n    cultures = {{ {" ".join(cults)} }}\n'
+
+                content = content[:inner_s] + block + content[inner_e:]
+                with open(fpath, "w", encoding="utf-8-sig") as f:
+                    f.write(content)
+                break
 
         # ── History file (lois politiques) ──
         hist_dir = os.path.join(mod, "common", "history", "countries")
@@ -533,6 +682,267 @@ class PaysFrame(ttk.Frame):
         self._gen_status.config(text="Sauvegardé !", foreground="#6f6")
         messagebox.showinfo("OK", f"{tag} sauvegardé !")
 
+    def _refresh_ruler_viewer(self):
+        if not hasattr(self, '_ruler_tree'):
+            return
+        self._ruler_tree.delete(*self._ruler_tree.get_children())
+
+        mod = self.config.mod_path
+        tag = self._gen_tag_var.get().strip().upper()
+        if not mod or not tag:
+            return
+
+        # Lire z_00_hmm_cha.txt pour trouver les templates du tag
+        hist_path = os.path.join(mod, "common", "history", "characters", "z_00_hmm_cha.txt")
+        templates_for_tag = []
+        if os.path.exists(hist_path):
+            with open(hist_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            indices = self._def_block_indices(content, f"c:{tag} ?")
+            if not indices:
+                # Essayer sans le ?
+                indices = self._def_block_indices(content, f"c:{tag}")
+            if indices:
+                _, _, inner_s, inner_e = indices
+                block = content[inner_s:inner_e]
+                for m in re.finditer(r'template\s*=\s*(\w+)', block):
+                    templates_for_tag.append(m.group(1))
+
+        if not templates_for_tag:
+            return
+
+        # Lire la localisation pour résoudre les noms
+        loc_path = os.path.join(mod, "localization", "english",
+                                "00_hmm_character_template_l_english.yml")
+        loc = {}
+        if os.path.exists(loc_path):
+            with open(loc_path, "r", encoding="utf-8-sig") as f:
+                for line in f:
+                    m = re.match(r'\s*(\w+):\s*"([^"]*)"', line)
+                    if m:
+                        loc[m.group(1)] = m.group(2)
+
+        # Lire les templates pour extraire first_name / last_name
+        tpl_path = os.path.join(mod, "common", "character_templates",
+                                "00_hmm_character_templates.txt")
+        tpl_data = {}
+        if os.path.exists(tpl_path):
+            with open(tpl_path, "r", encoding="utf-8") as f:
+                tpl_content = f.read()
+            for tpl_key in templates_for_tag:
+                idx = self._def_block_indices(tpl_content, tpl_key)
+                if idx:
+                    _, _, ts, te = idx
+                    b = tpl_content[ts:te]
+                    fm = re.search(r'first_name\s*=\s*(\w+)', b)
+                    lm = re.search(r'last_name\s*=\s*(\w+)', b)
+                    fn = loc.get(fm.group(1), fm.group(1)) if fm else ""
+                    ln = loc.get(lm.group(1), lm.group(1)) if lm else ""
+                    tpl_data[tpl_key] = f"{fn} {ln}".strip()
+
+        for tpl_key in templates_for_tag:
+            nom = tpl_data.get(tpl_key, "")
+            self._ruler_tree.insert("", tk.END, values=(tpl_key, nom))
+
+    def _on_ruler_select(self, *_):
+        sel = self._ruler_tree.selection()
+        if not sel:
+            return
+        tpl_key, _ = self._ruler_tree.item(sel[0], "values")
+        # Pré-remplir les champs depuis la template
+        mod = self.config.mod_path
+        if not mod:
+            return
+        tpl_path = os.path.join(mod, "common", "character_templates",
+                                "00_hmm_character_templates.txt")
+        if not os.path.exists(tpl_path):
+            return
+        with open(tpl_path, "r", encoding="utf-8") as f:
+            tpl_content = f.read()
+        idx = self._def_block_indices(tpl_content, tpl_key)
+        if not idx:
+            return
+        _, _, ts, te = idx
+        b = tpl_content[ts:te]
+        for pat, var in [
+            (r'first_name\s*=\s*(\w+)',      self._gen_ruler_first),
+            (r'last_name\s*=\s*(\w+)',       self._gen_ruler_last),
+            (r'culture\s*=\s*(\w+)',         self._gen_ruler_culture),
+            (r'birth_date\s*=\s*([\d.]+)',   self._gen_ruler_birth),
+            (r'interest_group\s*=\s*(\w+)',  self._gen_ruler_ig),
+            (r'ideology\s*=\s*(\w+)',        self._gen_ruler_ideology),
+        ]:
+            m = re.search(pat, b)
+            if m:
+                var.set(m.group(1))
+        fm = re.search(r'female\s*=\s*(\w+)', b)
+        if fm:
+            self._gen_ruler_female.set(fm.group(1) == "yes")
+
+    def _delete_ruler(self):
+        sel = self._ruler_tree.selection()
+        if not sel:
+            messagebox.showerror("Erreur", "Sélectionne un ruler dans la liste")
+            return
+        tpl_key, nom = self._ruler_tree.item(sel[0], "values")
+        if not messagebox.askyesno("Confirmer", f"Supprimer le ruler '{nom}' ({tpl_key}) ?"):
+            return
+
+        mod = self.config.mod_path
+        tag = self._gen_tag_var.get().strip().upper()
+
+        # Supprimer du fichier template
+        tpl_path = os.path.join(mod, "common", "character_templates",
+                                "00_hmm_character_templates.txt")
+        if os.path.exists(tpl_path):
+            with open(tpl_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            idx = self._def_block_indices(content, tpl_key)
+            if idx:
+                ts, te, _, _ = idx
+                content = content[:ts].rstrip() + "\n" + content[te:].lstrip("\n")
+                with open(tpl_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+
+        # Supprimer du fichier history
+        hist_path = os.path.join(mod, "common", "history", "characters", "z_00_hmm_cha.txt")
+        if os.path.exists(hist_path):
+            with open(hist_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            content = re.sub(
+                rf'\tc:{tag}\s*\?=\s*\{{[^}}]*template\s*=\s*{re.escape(tpl_key)}[^}}]*\}}[^}}]*\}}',
+                '', content, flags=re.DOTALL)
+            with open(hist_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+        self._refresh_ruler_viewer()
+
+    def _create_ruler(self):
+        mod = self.config.mod_path
+        tag = self._gen_tag_var.get().strip().upper()
+        if not mod or not tag:
+            messagebox.showerror("Erreur", "Aucun pays sélectionné")
+            return
+
+        first = self._gen_ruler_first.get().strip()
+        last  = self._gen_ruler_last.get().strip()
+        if not first:
+            messagebox.showerror("Erreur", "First Name est obligatoire")
+            return
+
+        # Clé template : TAG_prenom_character_template
+        first_key = first.lower().replace(" ", "_")
+        last_key  = last.lower().replace(" ", "_") if last else ""
+        tpl_key   = f"{tag.lower()}_{first_key}_character_template"
+
+        culture = self._gen_ruler_culture.get().strip() or "primary_culture"
+        if culture == "primary_culture" or culture == "YYYY.MM.JJ":
+            culture = "primary_culture"
+
+        birth = self._gen_ruler_birth.get().strip()
+        if birth == "YYYY.MM.JJ" or not birth:
+            birth = ""
+
+        female  = "yes" if self._gen_ruler_female.get() else "no"
+        ig      = self._gen_ruler_ig.get().strip() or "ig_landowners"
+        ideology = self._gen_ruler_ideology.get().strip() or "ideology_royalist"
+
+        # ── 1. Template ───────────────────────────────────────
+        tpl_dir  = os.path.join(mod, "common", "character_templates")
+        os.makedirs(tpl_dir, exist_ok=True)
+        tpl_path = os.path.join(tpl_dir, "00_hmm_character_templates.txt")
+
+        birth_line = f"\n    birth_date = {birth}" if birth else ""
+        tpl_block = (
+            f"\n{tpl_key} = {{\n"
+            f"    first_name = {first_key}\n"
+            f"    last_name = {last_key if last_key else first_key}\n"
+            f"    historical = yes\n"
+            f"    culture = {culture}\n"
+            f"    female = {female}"
+            f"{birth_line}\n"
+            f"    ideology = {ideology}\n"
+            f"    interest_group = {ig}\n"
+            f"}}\n"
+        )
+
+        if os.path.exists(tpl_path):
+            with open(tpl_path, "r", encoding="utf-8") as f:
+                tpl_content = f.read()
+            if tpl_key in tpl_content:
+                messagebox.showwarning("Attention", f"La template '{tpl_key}' existe déjà.")
+            else:
+                tpl_content = tpl_content.rstrip() + "\n" + tpl_block
+                with open(tpl_path, "w", encoding="utf-8") as f:
+                    f.write(tpl_content)
+        else:
+            with open(tpl_path, "w", encoding="utf-8") as f:
+                f.write(tpl_block)
+
+        # ── 2. History characters ─────────────────────────────
+        hist_dir  = os.path.join(mod, "common", "history", "characters")
+        os.makedirs(hist_dir, exist_ok=True)
+        hist_path = os.path.join(hist_dir, "z_00_hmm_cha.txt")
+
+        char_entry = (
+            f"\tc:{tag} ?= {{\n"
+            f"\t\tcreate_character = {{\n"
+            f"\t\t\ttemplate = {tpl_key}\n"
+            f"\t\t\truler = yes\n"
+            f"\t\t}}\n"
+            f"\t}}\n"
+        )
+
+        if os.path.exists(hist_path):
+            with open(hist_path, "r", encoding="utf-8") as f:
+                hist_content = f.read()
+            # Insérer avant la dernière accolade fermante
+            last_brace = hist_content.rfind("}")
+            if last_brace != -1:
+                hist_content = hist_content[:last_brace] + char_entry + hist_content[last_brace:]
+            else:
+                hist_content = hist_content.rstrip() + "\n" + char_entry
+        else:
+            hist_content = f"CHARACTERS = {{\n{char_entry}}}\n"
+
+        with open(hist_path, "w", encoding="utf-8") as f:
+            f.write(hist_content)
+
+        # ── 3. Localisation ────────────────────────────────────
+        loc_dir  = os.path.join(mod, "localization", "english")
+        os.makedirs(loc_dir, exist_ok=True)
+        loc_path = os.path.join(loc_dir, "00_hmm_character_template_l_english.yml")
+
+        def name_to_loc(name):
+            return name.lower().replace(" ", "_"), name
+
+        first_loc_key, first_loc_val = name_to_loc(first)
+        last_loc_key,  last_loc_val  = name_to_loc(last) if last else (None, None)
+
+        if os.path.exists(loc_path):
+            with open(loc_path, "r", encoding="utf-8-sig") as f:
+                loc = f.read()
+        else:
+            loc = "l_english:\n"
+
+        def append_loc(text, key, val):
+            if not key or f" {key}:" in text:
+                return text
+            if not text.endswith("\n"):
+                text += "\n"
+            return text + f" {key}: \"{val}\"\n"
+
+        loc = append_loc(loc, first_loc_key, first_loc_val)
+        if last_loc_key:
+            loc = append_loc(loc, last_loc_key, last_loc_val)
+
+        with open(loc_path, "w", encoding="utf-8-sig") as f:
+            f.write(loc)
+
+        self._refresh_ruler_viewer()
+        messagebox.showinfo("OK",
+            f"Ruler créé !\n\nTemplate : {tpl_key}\nFichier history : z_00_hmm_cha.txt")
+
     def _tab_lois(self, nb):
         f = ttk.Frame(nb)
         nb.add(f, text="Lois")
@@ -550,10 +960,13 @@ class PaysFrame(ttk.Frame):
         ttk.Label(top, text="Pays :").pack(side="left")
         self._mod_tag = tk.StringVar()
         ttk.Entry(top, textvariable=self._mod_tag, width=8, state="readonly",
-                  font=("Segoe UI", 10, "bold")).pack(side="left", padx=(4, 12))
+                  font=("Segoe UI", 10, "bold")).pack(side="left", padx=(4, 8))
+        ttk.Button(top, text="Charger", command=self._load_country_laws).pack(side="left", padx=(0, 8))
         self._mod_status = ttk.Label(top, text="Sélectionne un pays dans la liste", foreground="#888")
-        self._mod_status.pack(side="left")
-        ttk.Button(top, text="Appliquer les lois", command=self._apply_laws).pack(side="right", padx=5)
+        self._mod_status.pack(side="left", padx=4)
+        tk.Button(top, text="Sauvegarder", command=self._apply_laws,
+                  bg="#1a7a1a", fg="white", activebackground="#2a9e2a", activeforeground="white",
+                  relief="flat", padx=10, pady=3).pack(side="right", padx=5)
 
         self._mod_tag.trace_add("write", lambda *args: self._load_country_laws())
         self._selected_country_tag = self._selected_country_tag or ""
@@ -726,18 +1139,20 @@ class PaysFrame(ttk.Frame):
         nb.add(f, text="Diplomacy")
 
         self._dipl_tag_var = tk.StringVar()
-        self._dipl_hist_file = ""
 
         # ── Barre du haut ──────────────────────────────────────
         top = ttk.Frame(f)
         top.pack(fill="x", padx=15, pady=(10, 6))
 
-        ttk.Label(top, text="Country Tag:").pack(side="left")
-        ttk.Entry(top, textvariable=self._dipl_tag_var, width=8,
-                  font=("Segoe UI", 10, "bold")).pack(side="left", padx=(4, 10))
-        ttk.Button(top, text="Load Data", command=self._load_diplomacy_data).pack(side="left")
-        self._dipl_status = ttk.Label(top, text="", foreground="#888")
-        self._dipl_status.pack(side="left", padx=10)
+        ttk.Label(top, text="Pays :").pack(side="left")
+        ttk.Entry(top, textvariable=self._dipl_tag_var, width=8, state="readonly",
+                  font=("Segoe UI", 10, "bold")).pack(side="left", padx=(4, 8))
+        ttk.Button(top, text="Charger", command=self._load_diplomacy_data).pack(side="left", padx=(0, 8))
+        self._dipl_status = ttk.Label(top, text="Sélectionne un pays dans la liste", foreground="#888")
+        self._dipl_status.pack(side="left", padx=4)
+        tk.Button(top, text="Sauvegarder", command=self._dipl_save_all,
+                  bg="#1a7a1a", fg="white", activebackground="#2a9e2a", activeforeground="white",
+                  relief="flat", padx=10, pady=3).pack(side="right", padx=5)
 
         ttk.Separator(f, orient="horizontal").pack(fill="x", padx=10, pady=(0, 8))
 
@@ -759,8 +1174,8 @@ class PaysFrame(ttk.Frame):
         ttk.Button(subj_lf, text="Remove Selected",
                    command=lambda: self._dipl_remove(self._dipl_subj_lb)).pack(fill="x", pady=(4, 0))
 
-        # Hostile / Truces
-        host_lf = ttk.LabelFrame(lists_frame, text="Hostile / Truces", padding=(6, 4))
+        # Hostile / Truces / Embargo
+        host_lf = ttk.LabelFrame(lists_frame, text="Hostile / Truces / Embargo", padding=(6, 4))
         host_lf.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         self._dipl_host_lb = tk.Listbox(host_lf, selectmode=tk.SINGLE, activestyle="none",
                                          font=("Segoe UI", 9), height=10)
@@ -785,33 +1200,99 @@ class PaysFrame(ttk.Frame):
         ttk.Label(add_row, text="Target Tag:").pack(side="left")
         ttk.Entry(add_row, textvariable=self._dipl_target_var, width=8).pack(side="left", padx=(4, 14))
 
+        _subj_types   = ["colony", "puppet", "dominion", "protectorate",
+                          "personal_union", "tributary", "vassal"]
+        _hostile_types = ["rivalry", "embargo", "truce"]
+
         ttk.Radiobutton(add_row, text="Subject", variable=self._dipl_rel_type,
                         value="subject").pack(side="left", padx=2)
-        ttk.Radiobutton(add_row, text="Hostile/Truce", variable=self._dipl_rel_type,
+        ttk.Radiobutton(add_row, text="Hostile/Truce/Embargo", variable=self._dipl_rel_type,
                         value="hostile").pack(side="left", padx=2)
 
-        subj_types = ["colony", "puppet", "dominion", "protectorate",
-                      "personal_union", "tributary", "vassal"]
-        ttk.Combobox(add_row, textvariable=self._dipl_subj_type, values=subj_types,
-                     width=16, state="readonly").pack(side="left", padx=(10, 6))
+        self._dipl_type_cb = ttk.Combobox(add_row, textvariable=self._dipl_subj_type,
+                                           values=_subj_types, width=16, state="readonly")
+        self._dipl_type_cb.pack(side="left", padx=(10, 6))
+
+        def _on_rel_type_change(*_):
+            if self._dipl_rel_type.get() == "subject":
+                self._dipl_type_cb["values"] = _subj_types
+                self._dipl_subj_type.set(_subj_types[0])
+            else:
+                self._dipl_type_cb["values"] = _hostile_types
+                self._dipl_subj_type.set(_hostile_types[0])
+
+        self._dipl_rel_type.trace_add("write", _on_rel_type_change)
         ttk.Button(add_row, text="Create",
                    command=self._dipl_add_relationship).pack(side="left", padx=4)
+
+        # ── Rivalités ─────────────────────────────────────────
+        riv_lf = ttk.LabelFrame(f, text="Rivalités", padding=(10, 6))
+        riv_lf.pack(fill="x", padx=10, pady=(4, 4))
+        riv_lf.columnconfigure(0, weight=1)
+
+        riv_tv_frame = ttk.Frame(riv_lf)
+        riv_tv_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        self._dipl_riv_tv = ttk.Treeview(riv_tv_frame, columns=("tag",),
+                                          show="headings", height=5, selectmode="browse")
+        self._dipl_riv_tv.heading("tag", text="Target Tag")
+        self._dipl_riv_tv.column("tag", width=160)
+        riv_tv_sb = ttk.Scrollbar(riv_tv_frame, command=self._dipl_riv_tv.yview)
+        self._dipl_riv_tv.config(yscrollcommand=riv_tv_sb.set)
+        self._dipl_riv_tv.pack(side="left", fill="both", expand=True)
+        riv_tv_sb.pack(side="right", fill="y")
+
+        riv_form = ttk.Frame(riv_lf)
+        riv_form.grid(row=0, column=1, sticky="n")
+        self._dipl_riv_target_var = tk.StringVar()
+        ttk.Label(riv_form, text="Target :").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Entry(riv_form, textvariable=self._dipl_riv_target_var, width=10).grid(
+            row=0, column=1, padx=4, pady=3)
+        ttk.Button(riv_form, text="Ajouter",
+                   command=self._dipl_riv_add).grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(8, 3))
+        ttk.Button(riv_form, text="Supprimer",
+                   command=self._dipl_riv_delete).grid(
+            row=2, column=0, columnspan=2, sticky="ew")
 
         # ── Set Relations ──────────────────────────────────────
         rel_lf = ttk.LabelFrame(f, text="Set Relations", padding=(10, 6))
         rel_lf.pack(fill="x", padx=10, pady=(4, 10))
+        rel_lf.columnconfigure(0, weight=1)
 
-        self._dipl_rel_target = tk.StringVar()
-        self._dipl_rel_value  = tk.StringVar(value="0")
+        tv_frame = ttk.Frame(rel_lf)
+        tv_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        self._dipl_rel_tv = ttk.Treeview(tv_frame, columns=("tag", "val"),
+                                          show="headings", height=6, selectmode="browse")
+        self._dipl_rel_tv.heading("tag", text="Target Tag")
+        self._dipl_rel_tv.heading("val", text="Valeur")
+        self._dipl_rel_tv.column("tag", width=120)
+        self._dipl_rel_tv.column("val", width=70, anchor="center")
+        rel_tv_sb = ttk.Scrollbar(tv_frame, command=self._dipl_rel_tv.yview)
+        self._dipl_rel_tv.config(yscrollcommand=rel_tv_sb.set)
+        self._dipl_rel_tv.pack(side="left", fill="both", expand=True)
+        rel_tv_sb.pack(side="right", fill="y")
+        self._dipl_rel_tv.bind("<<TreeviewSelect>>", self._dipl_rel_on_select)
 
-        rel_row = ttk.Frame(rel_lf)
-        rel_row.pack(fill="x")
-        ttk.Label(rel_row, text="Target Tag:").pack(side="left")
-        ttk.Entry(rel_row, textvariable=self._dipl_rel_target, width=8).pack(side="left", padx=(4, 16))
-        ttk.Label(rel_row, text="Value (-100 to 100):").pack(side="left")
-        ttk.Entry(rel_row, textvariable=self._dipl_rel_value, width=6).pack(side="left", padx=(4, 10))
-        ttk.Button(rel_row, text="Set Relation",
-                   command=self._dipl_set_relation).pack(side="left")
+        form = ttk.Frame(rel_lf)
+        form.grid(row=0, column=1, sticky="n")
+
+        self._dipl_rel_target_var = tk.StringVar()
+        self._dipl_rel_value_var  = tk.StringVar(value="0")
+
+        ttk.Label(form, text="Target :").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Entry(form, textvariable=self._dipl_rel_target_var, width=10).grid(
+            row=0, column=1, padx=4, pady=3)
+        ttk.Label(form, text="Valeur :").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(form, textvariable=self._dipl_rel_value_var, width=10).grid(
+            row=1, column=1, padx=4, pady=3)
+        ttk.Label(form, text="(-100 à 100)", font=("Segoe UI", 8)).grid(
+            row=2, column=1, sticky="w", padx=4)
+        ttk.Button(form, text="Ajouter / Modifier",
+                   command=self._dipl_rel_add_or_update).grid(
+            row=3, column=0, columnspan=2, sticky="ew", pady=(8, 3))
+        ttk.Button(form, text="Supprimer",
+                   command=self._dipl_rel_delete).grid(
+            row=4, column=0, columnspan=2, sticky="ew")
 
         # Auto-load si pays déjà sélectionné
         if self._selected_country_tag:
@@ -826,47 +1307,196 @@ class PaysFrame(ttk.Frame):
         if not mod or not tag:
             return
 
-        hist_dir = os.path.join(mod, "common", "history", "countries")
-        self._dipl_hist_file = ""
-        if os.path.exists(hist_dir):
-            for fname in os.listdir(hist_dir):
-                if fname.upper().startswith(tag):
-                    self._dipl_hist_file = os.path.join(hist_dir, fname)
-                    break
-
-        if not self._dipl_hist_file:
-            self._dipl_status.config(text=f"Fichier introuvable pour {tag}", foreground="#f66")
-            return
-
-        with open(self._dipl_hist_file, "r", encoding="utf-8") as f:
-            content = f.read()
-
+        dipl_dir = os.path.join(mod, "common", "history", "diplomacy")
         self._dipl_subj_lb.delete(0, tk.END)
         self._dipl_host_lb.delete(0, tk.END)
+        self._dipl_riv_tv.delete(*self._dipl_riv_tv.get_children())
+        self._dipl_rel_tv.delete(*self._dipl_rel_tv.get_children())
 
-        # Sujets
-        for m in re.finditer(
-            r'create_subject\s*=\s*\{[^}]*subject_type\s*=\s*(\w+)[^}]*subject\s*=\s*c:(\w+)[^}]*\}',
-            content, re.DOTALL
-        ):
-            self._dipl_subj_lb.insert(tk.END, f"{m.group(2)} ({m.group(1)})")
+        if not os.path.exists(dipl_dir):
+            self._dipl_status.config(text="Dossier diplomacy introuvable", foreground="#f66")
+            return
 
-        # Relations hostiles (valeur négative)
-        for m in re.finditer(
-            r'set_relations\s*=\s*\{[^}]*country\s*=\s*c:(\w+)[^}]*value\s*=\s*(-\d+)[^}]*\}',
-            content, re.DOTALL
-        ):
-            self._dipl_host_lb.insert(tk.END, f"{m.group(1)} ({m.group(2)})")
+        _subject_types = {"colony", "puppet", "dominion", "protectorate",
+                          "personal_union", "tributary", "vassal"}
+        subj_count = 0
+        host_count = 0
+        riv_count = 0
+        rel_count = 0
+
+        for fname in sorted(os.listdir(dipl_dir)):
+            if not fname.endswith(".txt"):
+                continue
+            fpath = os.path.join(dipl_dir, fname)
+            with open(fpath, "r", encoding="utf-8-sig") as fh:
+                content = fh.read()
+
+            indices = self._def_block_indices(content, f"c:{tag}")
+            if not indices:
+                continue
+            _, _, inner_start, inner_end = indices
+            block = content[inner_start:inner_end]
+
+            # create_diplomatic_pact entries
+            for pm in re.finditer(r'create_diplomatic_pact\s*=\s*\{', block):
+                depth = 0
+                pact_end = pm.start()
+                for i in range(pm.start(), len(block)):
+                    if block[i] == '{':
+                        depth += 1
+                    elif block[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            pact_end = i + 1
+                            break
+                pact_text = block[pm.start():pact_end]
+                cm = re.search(r'country\s*=\s*c:(\w+)', pact_text)
+                tm = re.search(r'type\s*=\s*(\w+)', pact_text)
+                if not cm or not tm:
+                    continue
+                target = cm.group(1)
+                pact_type = tm.group(1)
+                if pact_type in _subject_types:
+                    self._dipl_subj_lb.insert(tk.END, f"{target} ({pact_type})")
+                    subj_count += 1
+                elif pact_type == "rivalry":
+                    self._dipl_riv_tv.insert("", tk.END, values=(target,))
+                    riv_count += 1
+                else:
+                    self._dipl_host_lb.insert(tk.END, f"{target} ({pact_type})")
+                    host_count += 1
+
+            # set_relations entries (only from "relation" files)
+            if "relation" in fname.lower():
+                for rm in re.finditer(
+                    r'set_relations\s*=\s*\{\s*country\s*=\s*c:(\w+)\s*value\s*=\s*(-?\d+)',
+                    block
+                ):
+                    self._dipl_rel_tv.insert("", tk.END,
+                                              values=(rm.group(1), int(rm.group(2))))
+                    rel_count += 1
 
         self._dipl_status.config(
-            text=f"Chargé : {tag}  |  {self._dipl_subj_lb.size()} sujets, "
-                 f"{self._dipl_host_lb.size()} hostiles",
+            text=f"Chargé : {tag}  |  {subj_count} sujets, {riv_count} rivalités, "
+                 f"{host_count} hostiles/truces/embargos, {rel_count} relations",
             foreground="#6af")
 
     def _dipl_remove(self, listbox):
         sel = listbox.curselection()
         if sel:
             listbox.delete(sel[0])
+
+    def _dipl_save_all(self):
+        mod = self.config.mod_path
+        tag = self._dipl_tag_var.get().strip().upper()
+        if not mod or not tag:
+            return
+
+        dipl_dir = os.path.join(mod, "common", "history", "diplomacy")
+        os.makedirs(dipl_dir, exist_ok=True)
+
+        _type_routing = {
+            "rivalry":  ("rival",   "00_hmm_rivalries.txt"),
+            "embargo":  ("embargo", "00_hmm_embargos.txt"),
+            "truce":    ("truce",   "00_hmm_relations.txt"),
+        }
+        _subj_routing = ("subject", "00_subject_relationships.txt")
+
+        def _find_file(keyword, default):
+            for fn in os.listdir(dipl_dir):
+                if fn.endswith(".txt") and keyword in fn.lower():
+                    return os.path.join(dipl_dir, fn)
+            return os.path.join(dipl_dir, default)
+
+        # Collect create_diplomatic_pact entries grouped by target file
+        pacts_by_file = {}
+        for entry in self._dipl_subj_lb.get(0, tk.END):
+            m = re.match(r'(\w+)\s*\((\w+)\)', entry)
+            if m:
+                fp = _find_file(*_subj_routing)
+                pacts_by_file.setdefault(fp, []).append((m.group(1), m.group(2)))
+        for entry in self._dipl_host_lb.get(0, tk.END):
+            m = re.match(r'(\w+)\s*\((\w+)\)', entry)
+            if m:
+                pact_type = m.group(2)
+                keyword, default = _type_routing.get(pact_type, ("relation", "00_hmm_relations.txt"))
+                fp = _find_file(keyword, default)
+                pacts_by_file.setdefault(fp, []).append((m.group(1), pact_type))
+
+        # Collect rivalry entries from treeview → always go to the "rival" file
+        riv_fp = _find_file("rival", "00_hmm_rivalries.txt")
+        riv_targets = [self._dipl_riv_tv.item(iid, "values")[0]
+                       for iid in self._dipl_riv_tv.get_children()]
+        for tgt in riv_targets:
+            pacts_by_file.setdefault(riv_fp, []).append((tgt, "rivalry"))
+
+        # Collect set_relations from treeview → always go to the "relation" file
+        rel_fp = _find_file("relation", "00_hmm_relations.txt")
+        rel_rows = [self._dipl_rel_tv.item(iid, "values")
+                    for iid in self._dipl_rel_tv.get_children()]
+
+        # Remove this tag's block from ALL diplomacy files first
+        for fn in os.listdir(dipl_dir):
+            if not fn.endswith(".txt"):
+                continue
+            fp = os.path.join(dipl_dir, fn)
+            with open(fp, "r", encoding="utf-8-sig") as fh:
+                content = fh.read()
+            indices = self._def_block_indices(content, f"c:{tag}")
+            if not indices:
+                continue
+            tag_start, tag_end, _, _ = indices
+            content = content[:tag_start].rstrip() + "\n" + content[tag_end:].lstrip()
+            content = re.sub(r'DIPLOMACY\s*=\s*\{\s*\}', '', content)
+            with open(fp, "w", encoding="utf-8") as fh:
+                fh.write(content)
+
+        # Determine all files that need writing
+        all_files = set(pacts_by_file.keys())
+        if rel_rows:
+            all_files.add(rel_fp)
+        # riv_fp already added via pacts_by_file if riv_targets non-empty
+
+        def _write_tag_block(fp, pacts, set_rels):
+            inner_lines = ""
+            for target, ptype in pacts:
+                inner_lines += (f"\n\t\tcreate_diplomatic_pact = {{"
+                                f"\n\t\t\tcountry = c:{target}"
+                                f"\n\t\t\ttype = {ptype}"
+                                f"\n\t\t}}")
+            for tgt, val in set_rels:
+                inner_lines += f"\n\t\tset_relations = {{ country = c:{tgt} value = {val} }}"
+            if not inner_lines:
+                return
+            tag_block = f"\n\tc:{tag} ?= {{{inner_lines}\n\t}}"
+            if os.path.exists(fp):
+                with open(fp, "r", encoding="utf-8-sig") as fh:
+                    content = fh.read()
+            else:
+                content = "DIPLOMACY = {\n}\n"
+            dm = re.search(r'DIPLOMACY\s*=\s*\{', content)
+            if dm:
+                brace_start = dm.end() - 1
+                depth = 0
+                for i in range(brace_start, len(content)):
+                    if content[i] == '{':
+                        depth += 1
+                    elif content[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            content = content[:i] + tag_block + "\n" + content[i:]
+                            break
+            else:
+                content = f"DIPLOMACY = {{{tag_block}\n}}\n"
+            with open(fp, "w", encoding="utf-8") as fh:
+                fh.write(content)
+
+        for fp in all_files:
+            _write_tag_block(fp,
+                             pacts_by_file.get(fp, []),
+                             rel_rows if fp == rel_fp else [])
+
+        self._dipl_status.config(text="Sauvegardé !", foreground="#6f6")
 
     def _dipl_add_relationship(self):
         target = self._dipl_target_var.get().strip().upper()
@@ -875,77 +1505,67 @@ class PaysFrame(ttk.Frame):
             return
         rel = self._dipl_rel_type.get()
         if rel == "subject":
-            subj_type = self._dipl_subj_type.get()
-            self._dipl_subj_lb.insert(tk.END, f"{target} ({subj_type})")
+            self._dipl_subj_lb.insert(tk.END, f"{target} ({self._dipl_subj_type.get()})")
         else:
-            self._dipl_host_lb.insert(tk.END, f"{target} (hostile)")
+            self._dipl_host_lb.insert(tk.END, f"{target} ({self._dipl_subj_type.get()})")
         self._dipl_target_var.set("")
-        self._dipl_save()
+        self._dipl_save_all()
 
-    def _dipl_set_relation(self):
-        target = self._dipl_rel_target.get().strip().upper()
+    def _dipl_rel_on_select(self, *_):
+        sel = self._dipl_rel_tv.selection()
+        if not sel:
+            return
+        tgt, val = self._dipl_rel_tv.item(sel[0], "values")
+        self._dipl_rel_target_var.set(tgt)
+        self._dipl_rel_value_var.set(val)
+
+    def _dipl_rel_add_or_update(self):
+        target = self._dipl_rel_target_var.get().strip().upper()
+        if not target:
+            messagebox.showerror("Erreur", "Entre un Target Tag")
+            return
         try:
-            value = int(self._dipl_rel_value.get())
+            value = int(self._dipl_rel_value_var.get())
             value = max(-100, min(100, value))
         except ValueError:
             messagebox.showerror("Erreur", "Valeur invalide (entier -100 à 100)")
             return
+        # Update existing row if target already present
+        for iid in self._dipl_rel_tv.get_children():
+            if self._dipl_rel_tv.item(iid, "values")[0] == target:
+                self._dipl_rel_tv.item(iid, values=(target, value))
+                self._dipl_rel_target_var.set("")
+                self._dipl_rel_value_var.set("0")
+                return
+        # New row
+        self._dipl_rel_tv.insert("", tk.END, values=(target, value))
+        self._dipl_rel_target_var.set("")
+        self._dipl_rel_value_var.set("0")
+
+    def _dipl_rel_delete(self):
+        sel = self._dipl_rel_tv.selection()
+        if sel:
+            self._dipl_rel_tv.delete(sel[0])
+            self._dipl_rel_target_var.set("")
+            self._dipl_rel_value_var.set("0")
+
+    def _dipl_riv_add(self):
+        target = self._dipl_riv_target_var.get().strip().upper()
         if not target:
             messagebox.showerror("Erreur", "Entre un Target Tag")
             return
-        if not self._dipl_hist_file:
-            messagebox.showerror("Erreur", "Charge d'abord un pays")
-            return
+        # Avoid duplicate
+        for iid in self._dipl_riv_tv.get_children():
+            if self._dipl_riv_tv.item(iid, "values")[0] == target:
+                return
+        self._dipl_riv_tv.insert("", tk.END, values=(target,))
+        self._dipl_riv_target_var.set("")
 
-        with open(self._dipl_hist_file, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        # Supprimer entrée existante pour ce tag
-        content = re.sub(
-            rf'set_relations\s*=\s*\{{[^}}]*country\s*=\s*c:{target}[^}}]*\}}',
-            '', content, flags=re.DOTALL)
-
-        # Insérer la nouvelle relation
-        new_entry = f"\n\t\tset_relations = {{ country = c:{target} value = {value} }}"
-        tag = self._dipl_tag_var.get().strip().upper()
-        content = re.sub(
-            rf'(c:{tag}\s*\??=\s*{{)',
-            rf'\1{new_entry}',
-            content, count=1)
-
-        with open(self._dipl_hist_file, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        if value < 0:
-            self._dipl_host_lb.insert(tk.END, f"{target} ({value})")
-        self._dipl_status.config(text=f"Relation {target} → {value} sauvegardée", foreground="#6f6")
-
-    def _dipl_save(self):
-        if not self._dipl_hist_file:
-            return
-        tag = self._dipl_tag_var.get().strip().upper()
-
-        with open(self._dipl_hist_file, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        # Supprimer tous les create_subject existants
-        content = re.sub(r'\s*create_subject\s*=\s*\{[^}]*\}', '', content, flags=re.DOTALL)
-
-        # Reconstruire depuis la listbox
-        new_subjects = ""
-        for entry in self._dipl_subj_lb.get(0, tk.END):
-            m = re.match(r'(\w+)\s*\((\w+)\)', entry)
-            if m:
-                new_subjects += (f"\n\t\tcreate_subject = {{ "
-                                 f"subject_type = {m.group(2)} subject = c:{m.group(1)} }}")
-
-        content = re.sub(
-            rf'(c:{tag}\s*\??=\s*{{)',
-            rf'\1{new_subjects}',
-            content, count=1)
-
-        with open(self._dipl_hist_file, "w", encoding="utf-8") as f:
-            f.write(content)
+    def _dipl_riv_delete(self):
+        sel = self._dipl_riv_tv.selection()
+        if sel:
+            self._dipl_riv_tv.delete(sel[0])
+            self._dipl_riv_target_var.set("")
 
     def _tab_power_blocs(self, nb):
         f = ttk.Frame(nb)
@@ -966,14 +1586,18 @@ class PaysFrame(ttk.Frame):
         top = ttk.Frame(f)
         top.pack(fill="x", padx=15, pady=(10, 6))
 
-        ttk.Label(top, text="Target Tag:").pack(side="left")
-        ttk.Entry(top, textvariable=self._pb_tag_var, width=8).pack(side="left", padx=(4, 14))
+        ttk.Label(top, text="Pays :").pack(side="left")
+        ttk.Entry(top, textvariable=self._pb_tag_var, width=8, state="readonly",
+                  font=("Segoe UI", 10, "bold")).pack(side="left", padx=(4, 8))
         ttk.Label(top, text="OR Select Bloc:").pack(side="left")
         self._pb_select_cb = ttk.Combobox(top, textvariable=self._pb_select_var,
-                                           state="readonly", width=28)
-        self._pb_select_cb.pack(side="left", padx=(4, 6))
+                                           state="readonly", width=24)
+        self._pb_select_cb.pack(side="left", padx=(4, 4))
         self._pb_select_cb.bind("<<ComboboxSelected>>", self._pb_on_select)
-        ttk.Button(top, text="Refresh List", command=self._pb_refresh_list).pack(side="left", padx=4)
+        ttk.Button(top, text="Charger", command=self._pb_refresh_list).pack(side="left", padx=4)
+        tk.Button(top, text="Sauvegarder", command=self._pb_save,
+                  bg="#1a7a1a", fg="white", activebackground="#2a9e2a", activeforeground="white",
+                  relief="flat", padx=10, pady=3).pack(side="right", padx=5)
 
         ttk.Separator(f, orient="horizontal").pack(fill="x", padx=10, pady=(4, 0))
 
@@ -1282,14 +1906,27 @@ class PaysFrame(ttk.Frame):
         self._mil_cavalry_var  = tk.StringVar(value="0")
         self._mil_formations   = []   # liste de dicts chargés
 
+        # ── Header unifié ──────────────────────────────────────
+        top = ttk.Frame(f)
+        top.pack(fill="x", padx=15, pady=(10, 6))
+        ttk.Label(top, text="Pays :").pack(side="left")
+        ttk.Entry(top, textvariable=self._mil_tag_var, width=8, state="readonly",
+                  font=("Segoe UI", 10, "bold")).pack(side="left", padx=(4, 8))
+        ttk.Button(top, text="Charger", command=self._mil_load_formations).pack(side="left", padx=(0, 8))
+        self._mil_status = ttk.Label(top, text="Sélectionne un pays dans la liste", foreground="#888")
+        self._mil_status.pack(side="left", padx=4)
+        tk.Button(top, text="Sauvegarder", command=self._mil_create,
+                  bg="#1a7a1a", fg="white", activebackground="#2a9e2a", activeforeground="white",
+                  relief="flat", padx=10, pady=3).pack(side="right", padx=5)
+
+        ttk.Separator(f, orient="horizontal").pack(fill="x", padx=10, pady=(4, 0))
+
         # ── Create Military Formation ──────────────────────────
         create_lf = ttk.LabelFrame(f, text="Create Military Formation", padding=(12, 8))
         create_lf.pack(fill="x", padx=10, pady=(10, 4))
 
         row1 = ttk.Frame(create_lf)
         row1.pack(fill="x", pady=3)
-        ttk.Label(row1, text="Country Tag:", width=14, anchor="w").pack(side="left")
-        ttk.Entry(row1, textvariable=self._mil_tag_var, width=8).pack(side="left", padx=(0, 20))
         ttk.Label(row1, text="Formation Name:", anchor="w").pack(side="left")
         ttk.Entry(row1, textvariable=self._mil_name_var, width=22).pack(side="left", padx=(4, 0))
 
@@ -1330,13 +1967,7 @@ class PaysFrame(ttk.Frame):
         manage_lf = ttk.LabelFrame(f, text="Manage Existing Formations", padding=(10, 6))
         manage_lf.pack(fill="both", expand=True, padx=10, pady=(0, 4))
 
-        mgr_top = ttk.Frame(manage_lf)
-        mgr_top.pack(fill="x", pady=(0, 4))
-        ttk.Label(mgr_top, text="Tag to Manage:").pack(side="left")
         self._mil_manage_tag = tk.StringVar()
-        ttk.Entry(mgr_top, textvariable=self._mil_manage_tag, width=8).pack(side="left", padx=(4, 8))
-        ttk.Button(mgr_top, text="Load Formations",
-                   command=self._mil_load_formations).pack(side="left")
 
         self._mil_listbox = tk.Listbox(manage_lf, height=6, font=("Segoe UI", 9),
                                         activestyle="none", selectmode=tk.SINGLE)
@@ -1439,7 +2070,8 @@ class PaysFrame(ttk.Frame):
             self._mil_load_formations()
 
     def _mil_load_formations(self):
-        tag = self._mil_manage_tag.get().strip().upper()
+        tag = self._mil_tag_var.get().strip().upper()
+        self._mil_manage_tag.set(tag)
         fpath = self._mil_get_file(tag)
         self._mil_listbox.delete(0, tk.END)
         self._mil_formations = []
@@ -1500,10 +2132,6 @@ class PaysFrame(ttk.Frame):
             f.write(content)
         self._mil_load_formations()
 
-    def _tab_character(self, nb):
-        f = ttk.Frame(nb)
-        nb.add(f, text="Character")
-        ttk.Label(f, text="Onglet Character", font=("Segoe UI", 12, "bold")).pack(pady=20)
 
     def _tab_techno_generale(self, nb):
         f = ttk.Frame(nb)
@@ -1532,7 +2160,9 @@ class PaysFrame(ttk.Frame):
         self._effect_combo.pack(side="left", fill="x", expand=True, padx=5, pady=5)
         self._effect_combo.current(0)
 
-        self._execute_button = ttk.Button(base_content, text="Exécuter", command=self._execute_tech_update)
+        self._execute_button = tk.Button(base_content, text="Exécuter", command=self._execute_tech_update,
+                                          bg="#1a7a1a", fg="white", activebackground="#2a9e2a",
+                                          activeforeground="white", relief="flat", padx=10, pady=4)
         self._execute_button.pack(side="left", padx=5, pady=5)
 
         outer = ttk.Frame(f)
