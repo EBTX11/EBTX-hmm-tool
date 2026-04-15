@@ -2814,7 +2814,12 @@ class PaysFrame(ttk.Frame):
                         break
             
             old_block = content[start:end]
-            
+
+            # Mémoriser l'ancienne composition pour calculer le delta bâtiment
+            old_total_units = self._mil_count_units_in_block(old_block)
+            old_state_m = re.search(r'state_region\s*=\s*s:(\w+)', old_block)
+            old_state = old_state_m.group(1) if old_state_m else ""
+
             # Générer le nouveau bloc avec les valeurs actuelles
             state    = self._mil_state_var.get().strip()
             hq_region = self._mil_sr_var.get().strip()
@@ -2900,11 +2905,20 @@ class PaysFrame(ttk.Frame):
             with open(fpath, "w", encoding="utf-8") as f:
                 f.write(content)
             
-            # Mettre à jour le bâtiment militaire
-            if state:
-                total_units = self._mil_calculate_total_units(ftype)
-                building_type = "building_barrack" if ftype == "army" else "building_naval_base"
-                self._mil_create_or_update_building(tag, state, building_type, total_units)
+            # Mettre à jour le bâtiment militaire par delta (nouveau - ancien)
+            new_total_units = self._mil_calculate_total_units(ftype)
+            building_type = "building_barrack" if ftype == "army" else "building_naval_base"
+
+            if old_state and old_state != state:
+                # L'état a changé : retirer de l'ancien, ajouter au nouveau
+                if old_total_units > 0:
+                    self._mil_create_or_update_building(tag, old_state, building_type, -old_total_units)
+                if new_total_units > 0 and state:
+                    self._mil_create_or_update_building(tag, state, building_type, new_total_units)
+            elif state:
+                delta = new_total_units - old_total_units
+                if delta != 0:
+                    self._mil_create_or_update_building(tag, state, building_type, delta)
 
             messagebox.showinfo("OK", f"Formation '{new_display_name}' mise à jour !")
             self._mil_load_formations()
@@ -2937,6 +2951,13 @@ class PaysFrame(ttk.Frame):
         self._mil_load_formations()
 
     # ── Gestion des bâtiments militaires ───────────────────────
+
+    def _mil_count_units_in_block(self, block):
+        """Retourne la somme de tous les count= dans un bloc create_military_formation."""
+        total = 0
+        for m in re.finditer(r'\bcount\s*=\s*(\d+)', block):
+            total += int(m.group(1))
+        return total
 
     def _mil_calculate_total_units(self, ftype):
         """Calcule le total des unités selon le type de formation."""
@@ -2978,8 +2999,8 @@ class PaysFrame(ttk.Frame):
         return os.path.join(buildings_dir, "00_west_europe.txt")
 
     def _mil_create_or_update_building(self, tag, state, building_type, levels):
-        """Crée ou met à jour un bâtiment militaire dans le fichier approprié."""
-        if not state or not building_type or levels <= 0:
+        """Crée, met à jour ou réduit un bâtiment militaire (levels = delta, peut être négatif)."""
+        if not state or not building_type or levels == 0:
             return
         
         fpath = self._mil_get_building_file(state)
@@ -2991,19 +3012,86 @@ class PaysFrame(ttk.Frame):
         with open(fpath, "r", encoding="utf-8") as f:
             content = f.read()
         
-        # Chercher si le bâtiment existe déjà pour ce tag dans cet état
-        existing_pattern = rf'(s:{re.escape(state)}\s*=\s*\{{[^}}]*region_state:{re.escape(tag)}\s*=\s*\{{[^}}]*create_building\s*=\s*\{{[^}}]*building\s*=\s*"{re.escape(building_type)}"[^}}]*\}})'
-        existing_match = re.search(existing_pattern, content, re.DOTALL)
+        # Déterminer le pattern de recherche selon le type de bâtiment
+        # building_barracks (avec s) ou building_naval_base
+        if "barrack" in building_type:
+            building_pattern = r'building[_"a-z]*barracks?'
+        else:
+            building_pattern = r'building[_"a-z]*naval[_"a-z]*base?'
         
-        if existing_match:
-            # Le bâtiment existe - mettre à jour les levels
-            existing_block = existing_match.group(1)
-            updated_block = re.sub(
-                r'(levels\s*=\s*)\d+',
-                rf'\g<1>{levels}',
-                existing_block
-            )
-            content = content.replace(existing_block, updated_block)
+        # Chercher tous les bâtiments militaires existants pour ce tag dans cet état
+        # et calculer le niveau total actuel
+        state_block_pattern = rf's:{re.escape(state)}\s*=\s*\{{[^}}]*region_state:{re.escape(tag)}\s*=\s*\{{'
+        state_match = re.search(state_block_pattern, content, re.DOTALL)
+        
+        current_total_levels = 0
+        existing_building_block = None
+        existing_building_start = -1
+        
+        if state_match:
+            # Extraire le bloc region_state
+            brace_start = state_match.end() - 1
+            depth = 0
+            region_end = brace_start
+            for i in range(brace_start, len(content)):
+                if content[i] == '{':
+                    depth += 1
+                elif content[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        region_end = i
+                        break
+            
+            region_block = content[brace_start:region_end]
+            
+            # Chercher tous les create_building avec le type de bâtiment militaire
+            for bm in re.finditer(r'create_building\s*=\s*\{', region_block):
+                bstart = bm.start()
+                bdepth = 0
+                bend = bstart
+                for i in range(bstart, len(region_block)):
+                    if region_block[i] == '{':
+                        bdepth += 1
+                    elif region_block[i] == '}':
+                        bdepth -= 1
+                        if bdepth == 0:
+                            bend = i + 1
+                            break
+                
+                building_block = region_block[bstart:bend]
+                
+                # Vérifier si c'est un bâtiment militaire du bon type
+                if re.search(building_pattern, building_block, re.IGNORECASE):
+                    # Extraire le niveau actuel
+                    level_match = re.search(r'levels\s*=\s*(\d+)', building_block)
+                    if level_match:
+                        current_total_levels += int(level_match.group(1))
+                    
+                    # Garder le premier bloc trouvé pour le mettre à jour
+                    if existing_building_block is None:
+                        existing_building_block = building_block
+                        existing_building_start = bstart
+        
+        # Calculer le nouveau niveau total (clamp à 0)
+        new_total_levels = max(0, current_total_levels + levels)
+
+        if existing_building_block:
+            abs_start = brace_start + existing_building_start
+            abs_end = abs_start + len(existing_building_block)
+            if new_total_levels == 0:
+                # Supprimer le bloc create_building entier
+                content = content[:abs_start] + content[abs_end:]
+            else:
+                # Mettre à jour le niveau
+                updated_block = re.sub(
+                    r'(levels\s*=\s*)\d+',
+                    rf'\g<1>{new_total_levels}',
+                    existing_building_block
+                )
+                content = content[:abs_start] + updated_block + content[abs_end:]
+        elif levels <= 0:
+            # Pas de bâtiment existant et delta négatif : rien à faire
+            return
         else:
             # Créer un nouveau bâtiment
             state_pattern = rf'(s:{re.escape(state)}\s*=\s*\{{[^}}]*region_state:{re.escape(tag)}\s*=\s*\{{)'
@@ -3073,7 +3161,7 @@ class PaysFrame(ttk.Frame):
         with open(fpath, "w", encoding="utf-8") as f:
             f.write(content)
         
-        print(f"Bâtiment {building_type} mis à jour pour {tag} dans {state} (levels={levels})")
+        print(f"Bâtiment {building_type} pour {tag}/{state}: delta={levels:+d} → levels={new_total_levels}")
 
 
     def _tab_techno_generale(self, nb):
