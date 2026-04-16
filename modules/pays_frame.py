@@ -2043,6 +2043,13 @@ class PaysFrame(ttk.Frame):
         self._mil_support_ship_var      = tk.StringVar(value="0")
         self._mil_formations   = []   # liste de dicts chargés
         self._mil_selected_idx = None  # index de la formation sélectionnée
+        # Variables pour Général/Amiral
+        self._mil_general_first = tk.StringVar()
+        self._mil_general_last = tk.StringVar()
+        self._mil_general_historical = tk.BooleanVar(value=True)
+        self._mil_general_rank = tk.StringVar(value="5")
+        # Variable pour le bouton Building
+        self._mil_building_var = tk.BooleanVar(value=False)
 
         # ── Header unifié ──────────────────────────────────────
         top = ttk.Frame(f)
@@ -2097,6 +2104,20 @@ class PaysFrame(ttk.Frame):
                         value="army", command=self._mil_on_type_change).pack(side="left", padx=(0, 10))
         ttk.Radiobutton(row3, text="Navy", variable=self._mil_type_var,
                         value="navy", command=self._mil_on_type_change).pack(side="left")
+
+        # Row pour le bouton Building
+        row4 = ttk.Frame(create_lf)
+        row4.pack(fill="x", pady=3)
+        ttk.Label(row4, text="Building:", width=14, anchor="w").pack(side="left")
+        ttk.Checkbutton(row4, text="Yes", variable=self._mil_building_var).pack(side="left")
+
+        # Row pour supprimer tous les bâtiments du TAG
+        row5 = ttk.Frame(create_lf)
+        row5.pack(fill="x", pady=3)
+        ttk.Label(row5, text="Remove All:", width=14, anchor="w").pack(side="left")
+        ttk.Button(row5, text="Delete All Buildings",
+                   command=self._mil_delete_all_buildings_for_tag,
+                   width=18).pack(side="left")
 
         # Composition
         comp_lf = ttk.LabelFrame(create_lf, text="Composition", padding=(8, 4))
@@ -2153,6 +2174,24 @@ class PaysFrame(ttk.Frame):
             ttk.Combobox(r, textvariable=type_var, values=types_list,
                          width=_cw, state="readonly").pack(side="left", padx=(0, 6))
             ttk.Entry(r, textvariable=count_var, width=_ew).pack(side="left")
+
+        # ── Général / Amiral ────────────────────────────────────────
+        gen_lf = ttk.LabelFrame(create_lf, text="Général / Amiral", padding=(8, 4))
+        gen_lf.pack(fill="x", pady=(6, 4))
+
+        gen_row1 = ttk.Frame(gen_lf)
+        gen_row1.pack(fill="x", pady=2)
+        ttk.Label(gen_row1, text="First Name:", width=14, anchor="w").pack(side="left")
+        ttk.Entry(gen_row1, textvariable=self._mil_general_first, width=20).pack(side="left", padx=(0, 8))
+        ttk.Label(gen_row1, text="Last Name:", width=12, anchor="w").pack(side="left")
+        ttk.Entry(gen_row1, textvariable=self._mil_general_last, width=20).pack(side="left")
+
+        gen_row2 = ttk.Frame(gen_lf)
+        gen_row2.pack(fill="x", pady=2)
+        ttk.Label(gen_row2, text="Rank:", width=14, anchor="w").pack(side="left")
+        ttk.Combobox(gen_row2, textvariable=self._mil_general_rank, 
+                     values=["1", "2", "3", "4", "5"], width=5, state="readonly").pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(gen_row2, text="Historical", variable=self._mil_general_historical).pack(side="left")
 
         # ── Boutons Create/Update ───────────────────────────────
         btn_row = ttk.Frame(create_lf)
@@ -2390,6 +2429,29 @@ class PaysFrame(ttk.Frame):
             with open(yml_path, "w", encoding="utf-8-sig") as fh:
                 fh.write(f"l_english:\n{entry}")
 
+    def _mil_write_character_localization(self, key, display_name):
+        """Écrit la clé de localisation pour un personnage dans le fichier YML."""
+        mod = self.config.mod_path
+        if not mod:
+            return
+        loc_dir = os.path.join(mod, "localization", "english")
+        os.makedirs(loc_dir, exist_ok=True)
+        yml_path = os.path.join(loc_dir, "00_hmm_character_template_l_english.yml")
+        entry = f' {key}: "{display_name}"\n'
+        if os.path.exists(yml_path):
+            with open(yml_path, "r", encoding="utf-8-sig") as fh:
+                content = fh.read()
+            # Vérifier si la clé existe déjà
+            if f" {key}:" not in content:
+                if not content.endswith("\n"):
+                    content += "\n"
+                content += entry
+                with open(yml_path, "w", encoding="utf-8-sig") as fh:
+                    fh.write(content)
+        else:
+            with open(yml_path, "w", encoding="utf-8-sig") as fh:
+                fh.write(f"l_english:\n{entry}")
+
     def _mil_create(self):
         tag = self._mil_tag_var.get().strip().upper()
         name = self._mil_name_var.get().strip()
@@ -2454,12 +2516,83 @@ class PaysFrame(ttk.Frame):
 
         # Générer le bloc au nouveau format
         hq_str = f"sr:{hq_region}" if hq_region else "sr:region_capital"
+        
+        # Ajouter save_scope_as à la formation
+        scope_key = f"{tag}_MILITARY_FORMATION_{idx:02d}"
+        
         formation_block = (
             f"\n\t\tcreate_military_formation = {{\n"
             f"\t\t\ttype = {unit_type}\n"
             f"\t\t\thq_region = {hq_str}\n"
             f"\t\t\tname = {loc_key}\n"
             f"{units_str}\n"
+            f"\t\t\tsave_scope_as = {scope_key}\n"
+            f"\t\t}}\n"
+        )
+        
+        # Générer le bloc du général/de l'amiral
+        general_block = ""
+        char_scope_key = f"character_{scope_key}"
+        
+        # Déterminer is_general ou is_admiral
+        is_general = "yes" if ftype == "army" else "no"
+        is_admiral = "yes" if ftype == "navy" else "no"
+        
+        # Préparer les noms
+        first_name_input = self._mil_general_first.get().strip()
+        last_name_input = self._mil_general_last.get().strip()
+        historical = "yes" if self._mil_general_historical.get() else "no"
+        rank = self._mil_general_rank.get().strip() or "5"
+        
+        # Générer les clés de localisation si nom custom
+        first_key = ""
+        last_key = ""
+        
+        if first_name_input:
+            # Transformer le nom en clé valide
+            first_key = first_name_input.lower().replace(" ", "_")
+            first_key = re.sub(r'[^a-z0-9_]', '', first_key)
+            first_key = f"{tag.lower()}_{first_key}_first"
+            
+            # Ajouter la localisation
+            self._mil_write_character_localization(first_key, first_name_input)
+        else:
+            # Utiliser le pattern par défaut
+            first_key = f"character_{scope_key}"
+        
+        if last_name_input:
+            last_key = last_name_input.lower().replace(" ", "_")
+            last_key = re.sub(r'[^a-z0-9_]', '', last_key)
+            last_key = f"{tag.lower()}_{last_key}_last"
+            self._mil_write_character_localization(last_key, last_name_input)
+        
+        # HQ sans le préfixe sr:
+        hq_no_prefix = hq_region if hq_region else "region_capital"
+        
+        # Construire le bloc create_character
+        general_block = (
+            f"\n\t\tcreate_character = {{\n"
+            f"\t\t\tis_general = {is_general}\n"
+            f"\t\t\tis_admiral = {is_admiral}\n"
+            f"\t\t\tfirst_name = {first_key}\n"
+        )
+        
+        if last_key:
+            general_block += f"\t\t\tlast_name = {last_key}\n"
+        
+        general_block += (
+            f"\t\t\thistorical = {historical}\n"
+            f"\t\t\thq = {hq_no_prefix}\n"
+            f"\t\t\tcommander_rank = commander_rank_{rank}\n"
+            f"\t\t\tage = 40\n"
+            f"\t\t\tsave_scope_as = {char_scope_key}\n"
+            f"\t\t}}\n"
+        )
+        
+        # Bloc scope de transfert
+        scope_block = (
+            f"\n\t\tscope:{char_scope_key} = {{\n"
+            f"\t\t\ttransfer_to_formation = scope:{scope_key}\n"
             f"\t\t}}\n"
         )
 
@@ -2489,7 +2622,9 @@ class PaysFrame(ttk.Frame):
                             if depth == 0:
                                 # Insérer juste avant la fermeture du bloc du tag
                                 insert_pos = i
-                                existing = existing[:insert_pos] + formation_block + existing[insert_pos:]
+                                # Combiner tous les blocs (formation + général + scope)
+                                full_block = formation_block + general_block + scope_block
+                                existing = existing[:insert_pos] + full_block + existing[insert_pos:]
                                 break
             else:
                 # Le tag n'existe pas - ajouter un nouveau bloc
@@ -2506,7 +2641,9 @@ class PaysFrame(ttk.Frame):
                             if depth == 0:
                                 # Insérer juste avant la fermeture
                                 insert_pos = i
-                                tag_block = f"\n\tc:{tag} ?= {{{formation_block}\t}}\n"
+                                # Combiner tous les blocs (formation + général + scope)
+                                full_block = formation_block + general_block + scope_block
+                                tag_block = f"\n\tc:{tag} ?= {{{full_block}\t}}\n"
                                 existing = existing[:insert_pos] + tag_block + existing[insert_pos:]
                                 break
         else:
@@ -2521,7 +2658,9 @@ class PaysFrame(ttk.Frame):
         if state:
             total_units = self._mil_calculate_total_units(ftype)
             building_type = "building_barrack" if ftype == "army" else "building_naval_base"
-            self._mil_create_or_update_building(tag, state, building_type, total_units)
+            # Only create/update building if Building checkbox is checked
+            if self._mil_building_var.get():
+                self._mil_create_or_update_building(tag, state, building_type, total_units)
 
         messagebox.showinfo("OK", f"Formation '{name}' créée pour {tag}\nFichier: {os.path.basename(fpath)}")
         if self._mil_manage_tag.get().strip().upper() == tag:
@@ -3055,6 +3194,86 @@ class PaysFrame(ttk.Frame):
         # Si pas trouvé, retourner le fichier par défaut
         return os.path.join(buildings_dir, "00_west_europe.txt")
 
+    def _mil_remove_all_buildings_for_tag(self, tag, building_type):
+        """Supprime tous les bâtiments du type spécifié pour un TAG dans tous les états."""
+        mod = self.config.mod_path
+        if not mod or not tag or not building_type:
+            return
+        
+        buildings_dir = os.path.join(mod, "common", "history", "buildings")
+        if not os.path.exists(buildings_dir):
+            return
+        
+        # Déterminer le pattern de recherche selon le type de bâtiment
+        if "barrack" in building_type:
+            building_pattern = r'building[_"a-z]*barracks?'
+        else:
+            building_pattern = r'building[_"a-z]*naval[_"a-z]*base?'
+        
+        # Scanner tous les fichiers de bâtiments
+        for fname in os.listdir(buildings_dir):
+            if not fname.endswith(".txt"):
+                continue
+            fpath = os.path.join(buildings_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception:
+                continue
+            
+            modified = False
+            
+            # Chercher tous les blocs d'états (s:XXX = { ... region_state:TAG = { ... })
+            for state_match in re.finditer(r's:(\w+)\s*=\s*\{', content):
+                state_code = state_match.group(1)
+                brace_start = state_match.end() - 1
+                depth = 0
+                state_end = brace_start
+                for i in range(brace_start, len(content)):
+                    if content[i] == '{':
+                        depth += 1
+                    elif content[i] == '}':
+                        depth -= 1
+                    if depth == 0:
+                        state_end = i
+                        break
+                
+                state_block = content[brace_start:state_end]
+                
+                # Vérifier si ce state_block contient region_state:TAG
+                if f"region_state:{tag}" not in state_block:
+                    continue
+                
+                # Chercher et supprimer tous les create_building du type spécifié
+                new_state_block = state_block
+                for building_match in re.finditer(r'create_building\s*=\s*\{', state_block):
+                    bstart = building_match.start()
+                    bdepth = 0
+                    bend = bstart
+                    for i in range(bstart, len(state_block)):
+                        if state_block[i] == '{':
+                            bdepth += 1
+                        elif state_block[i] == '}':
+                            bdepth -= 1
+                        if bdepth == 0:
+                            bend = i + 1
+                            break
+                    
+                    building_block = state_block[bstart:bend]
+                    
+                    # Vérifier si c'est le bon type de bâtiment
+                    if re.search(building_pattern, building_block, re.IGNORECASE):
+                        # Supprimer ce bloc
+                        new_state_block = new_state_block[:bstart] + new_state_block[bend:]
+                        modified = True
+                
+                if modified:
+                    content = content[:brace_start] + new_state_block + content[state_end:]
+            
+            if modified:
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(content)
+
     def _mil_create_or_update_building(self, tag, state, building_type, levels):
         """Crée, met à jour ou réduit un bâtiment militaire (levels = delta, peut être négatif)."""
         if not state or not building_type or levels == 0:
@@ -3219,6 +3438,25 @@ class PaysFrame(ttk.Frame):
             f.write(content)
         
         print(f"Bâtiment {building_type} pour {tag}/{state}: delta={levels:+d} → levels={new_total_levels}")
+
+    def _mil_delete_all_buildings_for_tag(self):
+        """Supprime tous les bâtiments militaires (barracks + naval bases) du TAG après confirmation."""
+        tag = self._mil_tag_var.get().strip().upper()
+        if not tag:
+            messagebox.showerror("Erreur", "Sélectionne d'abord un pays")
+            return
+        
+        if not messagebox.askyesno("Confirmer", 
+            f"Supprimer TOUS les bâtiments militaires (barracks + naval bases) du pays {tag} dans tous les états ?"):
+            return
+        
+        # Supprimer les barracks
+        self._mil_remove_all_buildings_for_tag(tag, "building_barrack")
+        
+        # Supprimer les naval bases
+        self._mil_remove_all_buildings_for_tag(tag, "building_naval_base")
+        
+        messagebox.showinfo("OK", f"Tous les bâtiments militaires de {tag} ont été supprimés !")
 
 
     def _tab_techno_generale(self, nb):
