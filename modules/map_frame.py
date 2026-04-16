@@ -299,6 +299,10 @@ class MapFrame(ttk.Frame):
         self._state_hc = {}
         self._cultures = []
         self._religions = []
+        # Variables pour la sélection par rectangle
+        self._selection_rect_start = None  # (x, y) du début du rectangle
+        self._selection_rect_end = None    # (x, y) de la fin du rectangle
+        self._selection_rect_id = None     # ID du rectangle sur le canvas
         self._build()
 
     def _get_mod_map_data_dir(self):
@@ -363,7 +367,9 @@ class MapFrame(ttk.Frame):
         hbar.pack(side="bottom", fill="x")
         vbar.pack(side="right", fill="y")
         self._canvas.pack(fill="both", expand=True)
-        self._canvas.bind("<Button-1>", self._on_click)
+        self._canvas.bind("<Button-1>", self._on_click_start)
+        self._canvas.bind("<B1-Motion>", self._on_click_drag)
+        self._canvas.bind("<ButtonRelease-1>", self._on_click_release)
         self._canvas.bind("<Control-Button-1>", self._on_ctrl_click)
         self._canvas.bind("<Button-3>", self._on_right_click)
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
@@ -661,6 +667,13 @@ class MapFrame(ttk.Frame):
         if self._rendered is None:
             return
         state, tag, prov_hex = self._get_province_at(event.x, event.y)
+        
+        # Vérifier si c'est une province terrestre
+        if state and state in self._sea_states:
+            # Province maritime - ne pas sélectionner
+            self._status_label.config(text=f"Province maritime ignorée: {prov_hex}")
+            return
+        
         if self._mode == MODE_STATE:
             if not state or not tag:
                 return
@@ -708,6 +721,13 @@ class MapFrame(ttk.Frame):
         if self._rendered is None:
             return
         state, tag, prov_hex = self._get_province_at(event.x, event.y)
+        
+        # Vérifier si c'est une province terrestre
+        if state and state in self._sea_states:
+            # Province maritime - ne pas sélectionner
+            self._status_label.config(text=f"Province maritime ignorée: {prov_hex}")
+            return
+        
         if self._mode == MODE_STATE:
             if state and tag:
                 key = (state, tag)
@@ -722,6 +742,126 @@ class MapFrame(ttk.Frame):
                 else:
                     self._prov_selected.add(prov_hex)
         self._refresh_ui(state, tag, prov_hex)
+
+    def _on_click_start(self, event):
+        """Début de la sélection par rectangle."""
+        if self._rendered is None:
+            return
+        
+        # Si on est en mode peinture, on utilise l'ancien comportement
+        if self._paint_mode_var.get():
+            self._on_click(event)
+            return
+        
+        # Sinon, on démarre une sélection par rectangle
+        self._selection_rect_start = (event.x, event.y)
+        self._selection_rect_end = (event.x, event.y)
+        
+        # Créer un rectangle de sélection
+        if self._selection_rect_id:
+            self._canvas.delete(self._selection_rect_id)
+        
+        self._selection_rect_id = self._canvas.create_rectangle(
+            event.x, event.y, event.x, event.y,
+            outline="#cba6f7", width=2, dash=(4, 2)
+        )
+
+    def _on_click_drag(self, event):
+        """Déplacement pendant la sélection par rectangle."""
+        if self._selection_rect_start is None or self._selection_rect_id is None:
+            return
+        
+        self._selection_rect_end = (event.x, event.y)
+        
+        # Mettre à jour le rectangle
+        x1, y1 = self._selection_rect_start
+        x2, y2 = self._selection_rect_end
+        self._canvas.coords(self._selection_rect_id, x1, y1, x2, y2)
+
+    def _on_click_release(self, event):
+        """Fin de la sélection par rectangle."""
+        if self._selection_rect_start is None or self._selection_rect_id is None:
+            return
+        
+        # Supprimer le rectangle
+        self._canvas.delete(self._selection_rect_id)
+        self._selection_rect_id = None
+        
+        # Récupérer les coordonnées du rectangle
+        x1, y1 = self._selection_rect_start
+        x2, y2 = self._selection_rect_end
+        
+        # Normaliser les coordonnées
+        left = min(x1, x2)
+        right = max(x1, x2)
+        top = min(y1, y2)
+        bottom = max(y1, y2)
+        
+        # Vérifier si c'est un clic simple (rectangle trop petit)
+        if abs(right - left) < 5 and abs(bottom - top) < 5:
+            # Clic simple - utiliser l'ancien comportement
+            self._on_click(event)
+        else:
+            # Sélection par rectangle
+            self._select_by_rectangle(left, top, right, bottom)
+        
+        self._selection_rect_start = None
+        self._selection_rect_end = None
+
+    def _select_by_rectangle(self, left, top, right, bottom):
+        """Sélectionne toutes les provinces terrestres dans le rectangle."""
+        if self._rendered is None or self._prov_arr is None:
+            return
+        
+        # Convertir les coordonnées canvas en coordonnées image
+        abs_left = self._canvas.canvasx(left)
+        abs_top = self._canvas.canvasy(top)
+        abs_right = self._canvas.canvasx(right)
+        abs_bottom = self._canvas.canvasy(bottom)
+        
+        # Convertir en coordonnées image (en tenant compte du zoom)
+        ox1 = max(0, min(int(abs_left / self._zoom), self._prov_arr.shape[1] - 1))
+        oy1 = max(0, min(int(abs_top / self._zoom), self._prov_arr.shape[0] - 1))
+        ox2 = max(0, min(int(abs_right / self._zoom), self._prov_arr.shape[1] - 1))
+        oy2 = max(0, min(int(abs_bottom / self._zoom), self._prov_arr.shape[0] - 1))
+        
+        # S'assurer que ox1 <= ox2 et oy1 <= oy2
+        if ox1 > ox2:
+            ox1, ox2 = ox2, ox1
+        if oy1 > oy2:
+            oy1, oy2 = oy2, oy1
+        
+        # Collecter toutes les provinces uniques dans le rectangle
+        selected_provs = set()
+        selected_states = set()
+        
+        for y in range(oy1, oy2 + 1):
+            for x in range(ox1, ox2 + 1):
+                rgb = self._prov_arr[y, x]
+                prov_hex = "x{:02X}{:02X}{:02X}".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+                state = self._prov_to_state.get(prov_hex)
+                
+                # Vérifier si c'est une province terrestre
+                if state and state not in self._sea_states:
+                    if self._mode == MODE_PROVINCE:
+                        selected_provs.add(prov_hex)
+                    elif self._mode == MODE_STATE:
+                        tag = self._prov_owner_map.get(prov_hex)
+                        if tag:
+                            selected_states.add((state, tag))
+        
+        # Mettre à jour la sélection
+        if self._mode == MODE_PROVINCE:
+            self._prov_selected.update(selected_provs)
+        elif self._mode == MODE_STATE:
+            self._selected.update(selected_states)
+        
+        # Rafraîchir l'interface
+        if selected_provs or selected_states:
+            self._refresh_ui()
+            self._status_label.config(
+                text=f"Sélection par rectangle: {len(selected_provs) if self._mode == MODE_PROVINCE else len(selected_states)} éléments"
+            )
 
     def _on_right_click(self, event):
         if self._rendered is None:
@@ -940,6 +1080,21 @@ class MapFrame(ttk.Frame):
             messagebox.showwarning("Attention", "Selectionne d'abord des provinces")
             return
         painted = 0
+        # D'abord, collecter tous les états et anciens tags affectés
+        affected_states = set()
+        old_tags_by_state = {}
+        
+        for prov_hex in list(self._prov_selected):
+            old_tag = self._prov_owner_map.get(prov_hex)
+            state = self._prov_to_state.get(prov_hex)
+            if not state or not old_tag:
+                continue
+            affected_states.add(state)
+            if state not in old_tags_by_state:
+                old_tags_by_state[state] = set()
+            old_tags_by_state[state].add(old_tag)
+        
+        # Transférer chaque province
         for prov_hex in list(self._prov_selected):
             old_tag = self._prov_owner_map.get(prov_hex)
             state = self._prov_to_state.get(prov_hex)
@@ -951,6 +1106,14 @@ class MapFrame(ttk.Frame):
                 self._substates[(state, old_tag)].discard(prov_hex)
             self._substates.setdefault((state, new_tag), set()).add(prov_hex)
             painted += 1
+        
+        # Nettoyer les entrées vides dans self._substates
+        for state in affected_states:
+            for old_tag in old_tags_by_state.get(state, set()):
+                key = (state, old_tag)
+                if key in self._substates and not self._substates[key]:
+                    del self._substates[key]
+        
         self._prov_selected.clear()
         self._refresh_render()
         self._save_status.config(text=f"{painted} province(s) modifiee(s) (non sauvegarde)")
