@@ -19,7 +19,6 @@ from PIL import Image, ImageTk
 from modules.map_frame import (
     parse_state_regions, parse_states_file, parse_country_colors,
     _random_country_color, build_render,
-    PROV_PNG, SR_DIR,
     INITIAL_ZOOM, ZOOM_STEP,
 )
 
@@ -246,6 +245,31 @@ class BuildPopFrame(ttk.Frame):
         self._load_buildings_list()
 
         self._build()
+
+    def _get_mod_map_data_dir(self):
+        """Retourne le chemin du dossier map_data du mod."""
+        mod = self.config.mod_path
+        if not mod:
+            return None
+        return os.path.join(mod, "map_data")
+
+    def _get_prov_png_path(self):
+        """Retourne le chemin de provinces.png dans le mod."""
+        map_data_dir = self._get_mod_map_data_dir()
+        if not map_data_dir:
+            return None
+        return os.path.join(map_data_dir, "provinces.png")
+
+    def _get_state_regions_dir(self):
+        """Retourne le chemin du dossier state_regions dans le mod."""
+        map_data_dir = self._get_mod_map_data_dir()
+        if not map_data_dir:
+            return None
+        return os.path.join(map_data_dir, "state_regions")
+
+    def _get_data_dir(self):
+        """Retourne le chemin du dossier data de l'outil (pour buildings, etc.)."""
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
     # ── CONSTRUCTION ─────────────────────────────────────────
 
@@ -925,7 +949,11 @@ class BuildPopFrame(ttk.Frame):
             mod = self.config.mod_path
 
             self._msg("Parsing state_regions...")
-            prov_to_state, state_to_provs, sea_states = parse_state_regions(SR_DIR)
+            # Utiliser le state_regions du mod
+            state_regions_dir = self._get_state_regions_dir()
+            if not state_regions_dir or not os.path.exists(state_regions_dir):
+                raise FileNotFoundError(f"Dossier state_regions introuvable dans le mod: {state_regions_dir}")
+            prov_to_state, state_to_provs, sea_states = parse_state_regions(state_regions_dir)
             self._prov_to_state  = prov_to_state
             self._state_to_provs = state_to_provs
             self._sea_states     = sea_states
@@ -962,7 +990,11 @@ class BuildPopFrame(ttk.Frame):
                     os.path.join(mod, "common/history/buildings"))
 
             self._msg("Chargement provinces.png...")
-            img = Image.open(PROV_PNG).convert("RGB")
+            # Utiliser le provinces.png du mod
+            prov_png_path = self._get_prov_png_path()
+            if not prov_png_path or not os.path.exists(prov_png_path):
+                raise FileNotFoundError(f"Fichier provinces.png introuvable dans le mod: {prov_png_path}")
+            img = Image.open(prov_png_path).convert("RGB")
             self._prov_arr = np.array(img)
 
             self._msg("Rendu numpy...")

@@ -18,10 +18,6 @@ import numpy as np
 from PIL import Image, ImageTk
 from modules.history_updater import update_history_files
 
-DATA_DIR  = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-PROV_PNG  = os.path.join(DATA_DIR, "map_data", "provinces.png")
-SR_DIR    = os.path.join(DATA_DIR, "map_data", "state_regions")
-
 OCEAN_COLOR   = (30,  45,  80)
 UNKNOWN_COLOR = (70, 70, 70)
 STATE_BORDER_COLOR = (180, 30, 30)
@@ -305,6 +301,31 @@ class MapFrame(ttk.Frame):
         self._religions = []
         self._build()
 
+    def _get_mod_map_data_dir(self):
+        """Retourne le chemin du dossier map_data du mod."""
+        mod = self.config.mod_path
+        if not mod:
+            return None
+        return os.path.join(mod, "map_data")
+
+    def _get_prov_png_path(self):
+        """Retourne le chemin de provinces.png dans le mod."""
+        map_data_dir = self._get_mod_map_data_dir()
+        if not map_data_dir:
+            return None
+        return os.path.join(map_data_dir, "provinces.png")
+
+    def _get_state_regions_dir(self):
+        """Retourne le chemin du dossier state_regions dans le mod."""
+        map_data_dir = self._get_mod_map_data_dir()
+        if not map_data_dir:
+            return None
+        return os.path.join(map_data_dir, "state_regions")
+
+    def _get_data_dir(self):
+        """Retourne le chemin du dossier data de l'outil (pour cultures, religions, etc.)."""
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+
     def _build(self):
         toolbar = ttk.Frame(self)
         toolbar.pack(fill="x", padx=8, pady=4)
@@ -472,7 +493,11 @@ class MapFrame(ttk.Frame):
         try:
             mod = self.config.mod_path
             self._after("Parsing state_regions...")
-            prov_to_state, state_to_provs, sea_states = parse_state_regions(SR_DIR)
+            # Utiliser le state_regions du mod
+            state_regions_dir = self._get_state_regions_dir()
+            if not state_regions_dir or not os.path.exists(state_regions_dir):
+                raise FileNotFoundError(f"Dossier state_regions introuvable dans le mod: {state_regions_dir}")
+            prov_to_state, state_to_provs, sea_states = parse_state_regions(state_regions_dir)
             self._prov_to_state = prov_to_state
             self._state_to_provs = state_to_provs
             self._sea_states = sea_states
@@ -497,7 +522,11 @@ class MapFrame(ttk.Frame):
                         country_colors.update(parse_country_colors(d))
             self._country_colors = country_colors
             self._after("Chargement provinces.png...")
-            img = Image.open(PROV_PNG).convert("RGB")
+            # Utiliser le provinces.png du mod
+            prov_png_path = self._get_prov_png_path()
+            if not prov_png_path or not os.path.exists(prov_png_path):
+                raise FileNotFoundError(f"Fichier provinces.png introuvable dans le mod: {prov_png_path}")
+            img = Image.open(prov_png_path).convert("RGB")
             self._prov_arr = np.array(img)
             self._after("Rendu numpy...")
             rendered, prov_ints, state_border = build_render(
@@ -509,11 +538,12 @@ class MapFrame(ttk.Frame):
             self._zoom_at_cache = None
             split = sum(1 for s in set(k[0] for k in substates) if len([k for k in substates if k[0] == s]) > 1)
             self._state_hc = parse_homelands_claims(states_path) if states_path and os.path.exists(states_path) else {}
-            # Charger les cultures
-            culture_file = os.path.join(DATA_DIR, "cultures", "00_cultures.txt")
+            # Charger les cultures (toujours depuis le dossier data de l'outil)
+            data_dir = self._get_data_dir()
+            culture_file = os.path.join(data_dir, "cultures", "00_cultures.txt")
             self._cultures = parse_cultures(culture_file) if os.path.exists(culture_file) else []
-            # Charger les religions
-            religion_file = os.path.join(DATA_DIR, "religions", "religion.txt")
+            # Charger les religions (toujours depuis le dossier data de l'outil)
+            religion_file = os.path.join(data_dir, "religions", "religion.txt")
             self._religions = parse_religions(religion_file) if os.path.exists(religion_file) else []
             self.after(0, self._init_hl_combo)
             self.after(0, self._display_map)
