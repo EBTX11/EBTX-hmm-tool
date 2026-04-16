@@ -32,6 +32,7 @@ class PaysFrame(ttk.Frame):
         super().__init__(parent)
         self.config = config
         self._selected_country_tag = None
+        self._countries = []  # Initialiser la liste des pays
         self._build()
 
     def _build(self):
@@ -2048,8 +2049,6 @@ class PaysFrame(ttk.Frame):
         self._mil_general_last = tk.StringVar()
         self._mil_general_historical = tk.BooleanVar(value=True)
         self._mil_general_rank = tk.StringVar(value="5")
-        # Variable pour le bouton Building
-        self._mil_building_var = tk.BooleanVar(value=False)
 
         # ── Header unifié ──────────────────────────────────────
         top = ttk.Frame(f)
@@ -2104,20 +2103,6 @@ class PaysFrame(ttk.Frame):
                         value="army", command=self._mil_on_type_change).pack(side="left", padx=(0, 10))
         ttk.Radiobutton(row3, text="Navy", variable=self._mil_type_var,
                         value="navy", command=self._mil_on_type_change).pack(side="left")
-
-        # Row pour le bouton Building
-        row4 = ttk.Frame(create_lf)
-        row4.pack(fill="x", pady=3)
-        ttk.Label(row4, text="Building:", width=14, anchor="w").pack(side="left")
-        ttk.Checkbutton(row4, text="Yes", variable=self._mil_building_var).pack(side="left")
-
-        # Row pour supprimer tous les bâtiments du TAG
-        row5 = ttk.Frame(create_lf)
-        row5.pack(fill="x", pady=3)
-        ttk.Label(row5, text="Remove All:", width=14, anchor="w").pack(side="left")
-        ttk.Button(row5, text="Delete All Buildings",
-                   command=self._mil_delete_all_buildings_for_tag,
-                   width=18).pack(side="left")
 
         # Composition
         comp_lf = ttk.LabelFrame(create_lf, text="Composition", padding=(8, 4))
@@ -2654,13 +2639,9 @@ class PaysFrame(ttk.Frame):
         with open(fpath, "w", encoding="utf-8") as f:
             f.write(existing)
 
-        # Créer ou mettre à jour le bâtiment militaire
-        if state:
-            total_units = self._mil_calculate_total_units(ftype)
-            building_type = "building_barrack" if ftype == "army" else "building_naval_base"
-            # Only create/update building if Building checkbox is checked
-            if self._mil_building_var.get():
-                self._mil_create_or_update_building(tag, state, building_type, total_units)
+        # Supprimer les bâtiments existants du TAG
+        building_type = "building_barrack" if ftype == "army" else "building_naval_base"
+        self._mil_remove_all_buildings_for_tag(tag, building_type)
 
         messagebox.showinfo("OK", f"Formation '{name}' créée pour {tag}\nFichier: {os.path.basename(fpath)}")
         if self._mil_manage_tag.get().strip().upper() == tag:
@@ -3198,81 +3179,104 @@ class PaysFrame(ttk.Frame):
         """Supprime tous les bâtiments du type spécifié pour un TAG dans tous les états."""
         mod = self.config.mod_path
         if not mod or not tag or not building_type:
+            print(f"[DEBUG] Paramètres invalides: mod={mod}, tag={tag}, building_type={building_type}")
             return
         
         buildings_dir = os.path.join(mod, "common", "history", "buildings")
         if not os.path.exists(buildings_dir):
+            print(f"[DEBUG] Buildings dir n'existe pas: {buildings_dir}")
             return
+        
+        print(f"[DEBUG] Suppression des {building_type} pour {tag} dans {buildings_dir}")
         
         # Déterminer le pattern de recherche selon le type de bâtiment
         if "barrack" in building_type:
-            building_pattern = r'building[_"a-z]*barracks?'
+            building_pattern = r'building\s*=\s*["\']?building_barracks?'
         else:
-            building_pattern = r'building[_"a-z]*naval[_"a-z]*base?'
+            building_pattern = r'building\s*=\s*["\']?building_naval_base'
         
         # Scanner tous les fichiers de bâtiments
         for fname in os.listdir(buildings_dir):
             if not fname.endswith(".txt"):
                 continue
             fpath = os.path.join(buildings_dir, fname)
+            print(f"[DEBUG] Traitement du fichier: {fname}")
+            
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     content = f.read()
-            except Exception:
+            except Exception as e:
+                print(f"[DEBUG] Erreur lecture {fname}: {e}")
                 continue
             
             modified = False
             
-            # Chercher tous les blocs d'états (s:XXX = { ... region_state:TAG = { ... })
-            for state_match in re.finditer(r's:(\w+)\s*=\s*\{', content):
-                state_code = state_match.group(1)
-                brace_start = state_match.end() - 1
+            # Chercher tous les blocs region_state:TAG dans le fichier
+            # Pattern: region_state:TAG = { ... }
+            region_pattern = rf'region_state:{tag}\s*\??\s*=\s*\{{'
+            
+            for region_match in re.finditer(region_pattern, content):
+                region_start = region_match.start()
+                # Trouver la fin du bloc region_state:TAG = { ... }
+                brace_start = region_match.end() - 1
                 depth = 0
-                state_end = brace_start
+                region_end = brace_start
                 for i in range(brace_start, len(content)):
                     if content[i] == '{':
                         depth += 1
                     elif content[i] == '}':
                         depth -= 1
                     if depth == 0:
-                        state_end = i
+                        region_end = i + 1
                         break
                 
-                state_block = content[brace_start:state_end]
+                region_block = content[brace_start:region_end]
+                print(f"[DEBUG] Trouvé region_state:{tag} dans {fname}, bloc de taille {len(region_block)}")
                 
-                # Vérifier si ce state_block contient region_state:TAG
-                if f"region_state:{tag}" not in state_block:
-                    continue
+                # Chercher tous les create_building dans ce bloc
+                new_region_block = region_block
+                to_remove = []
                 
-                # Chercher et supprimer tous les create_building du type spécifié
-                new_state_block = state_block
-                for building_match in re.finditer(r'create_building\s*=\s*\{', state_block):
+                for building_match in re.finditer(r'create_building\s*=\s*\{', region_block):
                     bstart = building_match.start()
                     bdepth = 0
                     bend = bstart
-                    for i in range(bstart, len(state_block)):
-                        if state_block[i] == '{':
+                    for i in range(bstart, len(region_block)):
+                        if region_block[i] == '{':
                             bdepth += 1
-                        elif state_block[i] == '}':
+                        elif region_block[i] == '}':
                             bdepth -= 1
                         if bdepth == 0:
                             bend = i + 1
                             break
                     
-                    building_block = state_block[bstart:bend]
+                    building_block = region_block[bstart:bend]
+                    
+                    # Debug: afficher le type de bâtiment trouvé
+                    type_match = re.search(r'building\s*=\s*["\']?(\w+)', building_block)
+                    if type_match:
+                        print(f"[DEBUG] Trouvé building: {type_match.group(1)}")
                     
                     # Vérifier si c'est le bon type de bâtiment
                     if re.search(building_pattern, building_block, re.IGNORECASE):
-                        # Supprimer ce bloc
-                        new_state_block = new_state_block[:bstart] + new_state_block[bend:]
-                        modified = True
+                        print(f"[DEBUG] -> Suppression: {building_block[:50]}...")
+                        to_remove.append((bstart, bend))
                 
-                if modified:
-                    content = content[:brace_start] + new_state_block + content[state_end:]
+                # Supprimer les bâtiments en ordre inverse pour préserver les positions
+                if to_remove:
+                    for bstart, bend in reversed(to_remove):
+                        new_region_block = new_region_block[:bstart] + new_region_block[bend:]
+                    modified = True
+                
+                # Remplacer le bloc dans le contenu
+                content = content[:brace_start] + new_region_block + content[region_end:]
             
             if modified:
                 with open(fpath, "w", encoding="utf-8") as f:
                     f.write(content)
+                print(f"[DEBUG] Fichier {fname} modifié avec succès")
+            else:
+                print(f"[DEBUG] Aucun bâtiment {building_type} trouvé pour {tag} dans {fname}")
 
     def _mil_create_or_update_building(self, tag, state, building_type, levels):
         """Crée, met à jour ou réduit un bâtiment militaire (levels = delta, peut être négatif)."""
