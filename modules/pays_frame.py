@@ -2940,6 +2940,10 @@ class PaysFrame(ttk.Frame):
             old_state_m = re.search(r'state_region\s*=\s*s:(\w+)', old_block)
             old_state = old_state_m.group(1) if old_state_m else ""
 
+            # Extraire le save_scope_as existant pour le conserver lors de la mise à jour
+            scope_key_match = re.search(r'save_scope_as\s*=\s*(\w+)', old_block)
+            scope_key = scope_key_match.group(1) if scope_key_match else loc_key
+
             # Générer le nouveau bloc avec les valeurs actuelles
             state    = self._mil_state_var.get().strip()
             hq_region = self._mil_sr_var.get().strip()
@@ -3008,7 +3012,7 @@ class PaysFrame(ttk.Frame):
                     ut = self._mil_support_ship_type_var.get() or "combat_unit_type_submarine"
                     units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {support_count}\n\t\t\t}}"
             
-            # Générer le nouveau bloc
+            # Générer le nouveau bloc (avec save_scope_as pour conserver le lien avec le personnage)
             hq_str = f"sr:{hq_region}" if hq_region else "sr:region_capital"
             new_block = (
                 f"create_military_formation = {{\n"
@@ -3016,6 +3020,7 @@ class PaysFrame(ttk.Frame):
                 f"\t\t\thq_region = {hq_str}\n"
                 f"\t\t\tname = {loc_key}\n"
                 f"{units_str}\n"
+                f"\t\t\tsave_scope_as = {scope_key}\n"
                 f"\t\t}}"
             )
             
