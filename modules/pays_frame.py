@@ -27,6 +27,30 @@ def tag_exists(tag, file_path):
     return bool(re.search(rf"\b{tag}\s*=\s*{{", content))
 
 
+def extract_blocks(text, keyword):
+    """Extrait tous les blocs qui commencent par un mot-clé donné."""
+    blocks = []
+    i = 0
+    while True:
+        start = text.find(keyword, i)
+        if start == -1:
+            break
+        brace_start = text.find("{", start)
+        if brace_start == -1:
+            break
+        depth = 1
+        j = brace_start + 1
+        while j < len(text) and depth > 0:
+            if text[j] == "{":
+                depth += 1
+            elif text[j] == "}":
+                depth -= 1
+            j += 1
+        blocks.append(text[start:j])
+        i = j
+    return blocks
+
+
 class PaysFrame(ttk.Frame):
     def __init__(self, parent, config):
         super().__init__(parent)
@@ -230,6 +254,14 @@ class PaysFrame(ttk.Frame):
         self._gen_ruler_female   = tk.BooleanVar(value=False)
         self._gen_color_rgb = [100, 100, 100]
 
+        # Variables pour Population Settings
+        self._pop_wealth  = tk.StringVar()
+        self._pop_literacy = tk.StringVar()
+        self._pop_current_total = 0
+        self._pop_state_data = []
+        self._pop_target_var = tk.StringVar()
+        self._pop_files = []
+
         # ── Barre du haut ──────────────────────────────────────
         top = ttk.Frame(f)
         top.pack(fill="x", padx=15, pady=(10, 4))
@@ -303,9 +335,15 @@ class PaysFrame(ttk.Frame):
         ttk.Label(s1_dyn, text="Adjective:", anchor="w").grid(row=0, column=2, sticky="w", padx=(0, 6), pady=4)
         ttk.Entry(s1_dyn, textvariable=self._gen_dyn_adj).grid(row=0, column=3, sticky="ew", pady=4)
 
-        # ── Culture & Religion ─────────────────────────────────
-        s2 = ttk.LabelFrame(gi, text="Culture & Religion", padding=(10, 6))
-        s2.pack(fill="x", padx=10, pady=4)
+        # ── Culture & Religion + Population Settings (2 colonnes) ─
+        cult_rel_frame = ttk.Frame(gi)
+        cult_rel_frame.pack(fill="x", padx=10, pady=4)
+        cult_rel_frame.columnconfigure(0, weight=1)
+        cult_rel_frame.columnconfigure(1, weight=1)
+
+        # Colonne gauche: Culture & Religion
+        s2 = ttk.LabelFrame(cult_rel_frame, text="Culture & Religion", padding=(10, 6))
+        s2.grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
         cult_frame = ttk.Frame(s2)
         cult_frame.pack(fill="x", pady=3)
@@ -330,6 +368,51 @@ class PaysFrame(ttk.Frame):
         ttk.Label(rel_frame, text="State Religion:", anchor="w", width=16).pack(side="left")
         ttk.Combobox(rel_frame, textvariable=self._gen_religion,
                      values=self._parse_religions(), width=28).pack(side="left", padx=5)
+
+        # Colonne droite: Population Settings
+        s5 = ttk.LabelFrame(cult_rel_frame, text="Population Settings", padding=(10, 6))
+        s5.grid(row=0, column=1, sticky="ew", padx=(5, 0))
+        s5.columnconfigure(1, weight=1)
+        s5.columnconfigure(3, weight=1)
+
+        self._gen_wealth  = tk.StringVar()
+        self._gen_literacy = tk.StringVar()
+
+        wealth_opts = ["", "effect_starting_pop_wealth_very_low", "effect_starting_pop_wealth_low",
+                       "effect_starting_pop_wealth_medium", "effect_starting_pop_wealth_high",
+                       "effect_starting_pop_wealth_very_high"]
+        lit_opts = ["", "effect_starting_pop_literacy_very_low", "effect_starting_pop_literacy_low",
+                    "effect_starting_pop_literacy_medium", "effect_starting_pop_literacy_high",
+                    "effect_starting_pop_literacy_very_high"]
+
+        ttk.Label(s5, text="Starting Wealth:", anchor="w").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=4)
+        ttk.Combobox(s5, textvariable=self._gen_wealth, values=wealth_opts,
+                     state="readonly").grid(row=0, column=1, sticky="ew", padx=(0, 20), pady=4)
+        ttk.Label(s5, text="Starting Literacy:", anchor="w").grid(row=0, column=2, sticky="w", padx=(0, 6), pady=4)
+        ttk.Combobox(s5, textvariable=self._gen_literacy, values=lit_opts,
+                     state="readonly").grid(row=0, column=3, sticky="ew", pady=4)
+
+        # ── Population Analysis ─────────────────────────────────
+        pop_anal_frame = ttk.Frame(s5)
+        pop_anal_frame.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(10, 4))
+
+        ttk.Label(pop_anal_frame, text="Population Analysis:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+
+        pop_btn_row = ttk.Frame(pop_anal_frame)
+        pop_btn_row.pack(fill="x", pady=3)
+        ttk.Button(pop_btn_row, text="Analyser", command=self._analyze_pop).pack(side="left", padx=(0, 5))
+        self._pop_result_label = ttk.Label(pop_btn_row, text="Total: -", foreground="#666")
+        self._pop_result_label.pack(side="left", padx=10)
+
+        pop_target_row = ttk.Frame(pop_anal_frame)
+        pop_target_row.pack(fill="x", pady=3)
+        ttk.Label(pop_target_row, text="Cible:").pack(side="left")
+        self._pop_target_entry = ttk.Entry(pop_target_row, textvariable=self._pop_target_var, width=15)
+        self._pop_target_entry.pack(side="left", padx=5)
+        ttk.Button(pop_target_row, text="Appliquer", command=self._apply_pop).pack(side="left", padx=5)
+
+        self._pop_log_text = tk.Text(pop_anal_frame, height=4, font=("Consolas", 8), state="disabled")
+        self._pop_log_text.pack(fill="x", pady=(3, 0))
 
         # ── Internal Politics ──────────────────────────────────
         s3 = ttk.LabelFrame(gi, text="Internal Politics", padding=(10, 6))
@@ -416,29 +499,6 @@ class PaysFrame(ttk.Frame):
         self._ruler_tree.pack(side="left", fill="x", expand=True)
         ruler_vsb.pack(side="right", fill="y")
         self._ruler_tree.bind("<<TreeviewSelect>>", self._on_ruler_select)
-
-        # ── Population Settings ────────────────────────────────
-        s5 = ttk.LabelFrame(gi, text="Population Settings", padding=(10, 6))
-        s5.pack(fill="x", padx=10, pady=(4, 12))
-        s5.columnconfigure(1, weight=1)
-        s5.columnconfigure(3, weight=1)
-
-        self._gen_wealth  = tk.StringVar()
-        self._gen_literacy = tk.StringVar()
-
-        wealth_opts = ["", "effect_starting_pop_wealth_very_low", "effect_starting_pop_wealth_low",
-                       "effect_starting_pop_wealth_medium", "effect_starting_pop_wealth_high",
-                       "effect_starting_pop_wealth_very_high"]
-        lit_opts = ["", "effect_starting_pop_literacy_very_low", "effect_starting_pop_literacy_low",
-                    "effect_starting_pop_literacy_medium", "effect_starting_pop_literacy_high",
-                    "effect_starting_pop_literacy_very_high"]
-
-        ttk.Label(s5, text="Starting Wealth:", anchor="w").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=4)
-        ttk.Combobox(s5, textvariable=self._gen_wealth, values=wealth_opts,
-                     state="readonly").grid(row=0, column=1, sticky="ew", padx=(0, 20), pady=4)
-        ttk.Label(s5, text="Starting Literacy:", anchor="w").grid(row=0, column=2, sticky="w", padx=(0, 6), pady=4)
-        ttk.Combobox(s5, textvariable=self._gen_literacy, values=lit_opts,
-                     state="readonly").grid(row=0, column=3, sticky="ew", pady=4)
 
     # ── Actions General ────────────────────────────────────────
 
@@ -3715,3 +3775,103 @@ class PaysFrame(ttk.Frame):
         print(f"Fichiers lus : {files}")
         print(f"Modifiés : {modified}")
         print("Script terminé")
+
+    # ── Population Analysis Methods ───────────────────────────
+
+    def _pop_log_write(self, msg):
+        """Écrit un message dans le log de population."""
+        self._pop_log_text.configure(state="normal")
+        self._pop_log_text.insert("end", msg + "\n")
+        self._pop_log_text.see("end")
+        self._pop_log_text.configure(state="disabled")
+
+    def _load_pop_files(self):
+        """Charge les fichiers de population depuis le dossier history/pops."""
+        mod = self.config.mod_path
+        if not mod:
+            return False
+        pops_dir = os.path.join(mod, "common", "history", "pops")
+        if not os.path.exists(pops_dir):
+            return False
+        self._pop_files = []
+        for root, _, files in os.walk(pops_dir):
+            for fname in files:
+                if fname.endswith(".txt"):
+                    self._pop_files.append(os.path.join(root, fname))
+        return True
+
+    def _get_total_for_tag(self, tag):
+        """Calcule la population totale pour un TAG donné."""
+        total = 0
+        state_data = []
+        for fpath in self._pop_files:
+            with open(fpath, "r", encoding="utf-8") as fh:
+                content = fh.read()
+            regions = extract_blocks(content, f"region_state:{tag}")
+            for region in regions:
+                pops = extract_blocks(region, "create_pop")
+                pop_blocks = []
+                state_total = 0
+                for p in pops:
+                    size_match = re.search(r"size\s*=\s*(\d+)", p)
+                    if size_match:
+                        size = int(size_match.group(1))
+                        state_total += size
+                        pop_blocks.append((p, size))
+                if state_total > 0:
+                    total += state_total
+                    state_data.append((fpath, pop_blocks, state_total))
+        return total, state_data
+
+    def _analyze_pop(self):
+        """Analyse la population du pays sélectionné."""
+        if not self._load_pop_files():
+            messagebox.showerror("Erreur", "Dossier pops introuvable")
+            return
+        tag = self._gen_tag_var.get().strip().upper()
+        if not tag:
+            messagebox.showerror("Erreur", "Aucun pays sélectionné")
+            return
+        total, data = self._get_total_for_tag(tag)
+        if total == 0:
+            self._pop_result_label.config(text="Total: 0", foreground="#f66")
+            self._pop_log_write(f"Aucune population trouvée pour {tag}")
+            return
+        self._pop_current_total = total
+        self._pop_state_data = data
+        self._pop_result_label.config(text=f"Total: {total:,}", foreground="#6a6")
+        self._pop_log_write(f"TAG: {tag} | Total: {total:,} | Fichiers: {len(data)}")
+
+    def _apply_pop(self):
+        """Applique la population cible avec un ratio."""
+        if not self._pop_current_total:
+            messagebox.showerror("Erreur", "Analyse d'abord une population")
+            return
+        try:
+            target = int(self._pop_target_var.get())
+        except ValueError:
+            messagebox.showerror("Erreur", "Cible invalide (nombre entier requis)")
+            return
+
+        ratio = target / self._pop_current_total
+        file_contents = {}
+        for fpath in self._pop_files:
+            with open(fpath, "r", encoding="utf-8") as fh:
+                file_contents[fpath] = fh.read()
+
+        for fpath, pops, _ in self._pop_state_data:
+            content = file_contents[fpath]
+            for block, size in pops:
+                new_size = max(1, int(size * ratio))
+                new_block = re.sub(r"size\s*=\s*\d+", f"size = {new_size}", block)
+                content = content.replace(block, new_block, 1)
+            file_contents[fpath] = content
+
+        for fpath, content in file_contents.items():
+            with open(fpath, "w", encoding="utf-8") as fh:
+                fh.write(content)
+
+        self._pop_log_write(f"Population ajustée: {self._pop_current_total:,} -> {target:,} (ratio {ratio:.3f})")
+        messagebox.showinfo("Succès", f"Population ajustée à {target:,}")
+        # Réanalyser pour mettre à jour le total
+        self._analyze_pop()

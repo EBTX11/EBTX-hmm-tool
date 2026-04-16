@@ -1,0 +1,7 @@
+with open('modules/pays_frame.py', 'r', encoding='utf-8') as f:
+    lines = f.readlines()
+
+# Afficher les lignes 37770-3780
+for i in range(37769, 37780):
+    if i < len(lines):
+        print(fr'Ligne {i+1}: {lines[i]}')
