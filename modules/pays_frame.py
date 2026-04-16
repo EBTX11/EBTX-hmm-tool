@@ -2065,24 +2065,82 @@ class PaysFrame(ttk.Frame):
             fh.write(content)
 
     def _pb_remove_bloc(self):
-        name = self._pb_key_var.get().strip()
-        leader = self._pb_leader_var.get().strip().upper()
-        if not name or name not in self._pb_bloc_files:
+        """Remove a power bloc from the files."""
+        # Get the selected bloc from the listbox
+        selection = self._pb_blocs_lb.curselection()
+        if not selection:
+            messagebox.showerror("Erreur", "Sélectionne un bloc dans la liste")
             return
-        fpath = self._pb_bloc_files[name]
+        
+        selected_text = self._pb_blocs_lb.get(selection[0])
+        match = re.search(r'^(.+?)\s*\(Leader:\s*(\w+)\)', selected_text)
+        if not match:
+            return
+        
+        bloc_name = match.group(1)
+        leader = match.group(2).upper()
+        
+        # Find the correct key in _pb_bloc_files (uses loc_key or leader as key)
+        bloc_key = None
+        for key, b in self._pb_blocs.items():
+            if b["name"] == bloc_name and b["leader"].upper() == leader:
+                bloc_key = key
+                break
+        
+        if not bloc_key or bloc_key not in self._pb_bloc_files:
+            messagebox.showerror("Erreur", "Bloc introuvable")
+            return
+        
+        fpath = self._pb_bloc_files[bloc_key]
         if not os.path.exists(fpath):
+            messagebox.showerror("Erreur", "Fichier introuvable")
             return
-        if not messagebox.askyesno("Confirmer", f"Supprimer le bloc '{name}' ?"):
+        
+        if not messagebox.askyesno("Confirmer", f"Supprimer le bloc '{bloc_name}' ?"):
             return
+        
         with open(fpath, "r", encoding="utf-8") as fh:
             content = fh.read()
-        content = re.sub(
-            rf'c:{re.escape(leader)}\s*\?=\s*\{{[^{{}}]*(?:\{{[^{{}}]*\}}[^{{}}]*)*\}}',
-            '', content, flags=re.DOTALL)
+        
+        # Find and remove the c:LEADER ?= { ... } block using proper brace counting
+        leader_pattern = rf'c:{re.escape(leader)}\s*\?=\s*\{{'
+        match = re.search(leader_pattern, content)
+        if match:
+            brace_start = match.end() - 1
+            depth = 0
+            block_end = brace_start
+            for i in range(brace_start, len(content)):
+                if content[i] == '{':
+                    depth += 1
+                elif content[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        block_end = i + 1
+                        break
+            
+            # Remove the block
+            content = content[:match.start()] + content[block_end:]
+        
         with open(fpath, "w", encoding="utf-8") as fh:
             fh.write(content)
+        
+        # Clean up localization file
+        mod = self.config.mod_path
+        if mod and bloc_key:
+            loc_path = os.path.join(mod, "localization", "english", "00_hmm_power_blocs_l_english.yml")
+            if os.path.exists(loc_path):
+                with open(loc_path, "r", encoding="utf-8-sig") as fh:
+                    loc_content = fh.read()
+                # Remove the bloc_key entry and the _adj entry
+                loc_content = re.sub(rf'^\s*{re.escape(bloc_key)}:0\s*".*"\n?', '', loc_content, flags=re.MULTILINE)
+                loc_content = re.sub(rf'^\s*{re.escape(bloc_key)}_adj:0\s*".*"\n?', '', loc_content, flags=re.MULTILINE)
+                # Clean up empty lines
+                loc_content = re.sub(r'\n\s*\n', '\n', loc_content)
+                with open(loc_path, "w", encoding="utf-8-sig") as fh:
+                    fh.write(loc_content)
+        
         self._pb_refresh_list()
-        messagebox.showinfo("OK", f"Bloc '{name}' supprimé")
+        messagebox.showinfo("OK", f"Bloc '{bloc_name}' supprimé")
 
     def _tab_military_formation(self, nb):
         f = ttk.Frame(nb)
