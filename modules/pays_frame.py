@@ -3062,37 +3062,64 @@ class PaysFrame(ttk.Frame):
         with open(fpath, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # ── Trouver et extraire le bloc create_military_formation ──
-        pattern = rf'create_military_formation\s*=\s*\{{[^{{]*?name\s*=\s*{re.escape(name)}'
-        m = re.search(pattern, content, re.DOTALL)
-        if not m:
-            messagebox.showerror("Erreur", f"Formation '{name}' introuvable dans le fichier")
-            return
-
-        start = m.start()
-        depth = 0
-        end = start
-        for i in range(start, len(content)):
-            if content[i] == '{':
-                depth += 1
-            elif content[i] == '}':
-                depth -= 1
-                if depth == 0:
-                    end = i + 1
-                    break
-
-        block = content[start:end]
-
-        # ── Supprimer le bloc (+ éventuelle ligne vide avant) ──
-        pre = content[:start].rstrip('\n')
-        content = pre + '\n' + content[end:]
-
-        with open(fpath, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        # ── Si formation HMM : supprimer la localisation + ajuster bâtiment ──
+        # ── Si formation HMM : approche simplifiée par regex ──
         if is_hmm:
-            # Localisation
+            tag_lower = tag.lower()
+            key = name
+            char_key = f"character_{name}"
+            ftype = "army"
+            
+            print(f"[DEBUG] Suppression de {name} dans {fpath}")
+            print(f"[DEBUG] is_hmm={is_hmm}, key={key}, char_key={char_key}")
+            
+            # Compter les suppressions
+            removed_count = 0
+            
+            # 1. Supprimer create_military_formation avec name = KEY
+            # Pattern qui capture le bloc entier
+            pattern1 = rf'(create_military_formation\s*=\s*\{{[^}}]*?name\s*=\s*{re.escape(key)}[^}}]*\}}[^}}]*\}})'
+            matches1 = list(re.finditer(pattern1, content, re.DOTALL))
+            print(f"[DEBUG] Trouvé {len(matches1)} create_military_formation à supprimer")
+            for m in matches1:
+                # Extraire le type pour les bâtiments
+                block = m.group(1)
+                ftype_match = re.search(r'\btype\s*=\s*(army|fleet)\b', block)
+                if ftype_match:
+                    ftype = ftype_match.group(1)
+                    print(f"[DEBUG] Type détecté: {ftype}")
+            content = re.sub(pattern1, '', content, flags=re.DOTALL)
+            removed_count += len(matches1)
+            
+            # 2. Supprimer create_character avec first_name = character_KEY ou save_scope_as = character_KEY
+            pattern2 = rf'(create_character\s*=\s*\{{[^}}]*?(?:first_name\s*=\s*{re.escape(char_key)}|save_scope_as\s*=\s*{re.escape(char_key)}|first_name\s*=\s*{re.escape(tag_lower)}_[^_]+_first)[^}}]*\}}[^}}]*\}})'
+            matches2 = list(re.finditer(pattern2, content, re.DOTALL))
+            print(f"[DEBUG] Trouvé {len(matches2)} create_character à supprimer")
+            content = re.sub(pattern2, '', content, flags=re.DOTALL)
+            removed_count += len(matches2)
+            
+            # 3. Supprimer scope:character_KEY = { ... }
+            pattern3 = rf'(scope:{re.escape(char_key)}\s*=\s*\{{[^}}]*\}}[^}}]*\}})'
+            matches3 = list(re.finditer(pattern3, content, re.DOTALL))
+            print(f"[DEBUG] Trouvé {len(matches3)} scope à supprimer")
+            content = re.sub(pattern3, '', content, flags=re.DOTALL)
+            removed_count += len(matches3)
+            
+            print(f"[DEBUG] Total supprimé: {removed_count} blocs")
+            
+            if removed_count == 0:
+                messagebox.showwarning("Attention", f"Aucun bloc trouvé pour {name}. Vérifiez le format du fichier.")
+            
+            # Nettoyer les lignes vides multiples
+            content = re.sub(r'\n\s*\n\s*\n+', '\n\n', content)
+            
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(content)
+            
+            # Supprimer les bâtiments associés
+            building_type = "building_barrack" if ftype == "army" else "building_naval_base"
+            self._mil_remove_all_buildings_for_tag(tag, building_type)
+            
+            # Supprimer la localisation de la formation
             mod = self.config.mod_path
             if mod:
                 yml_path = os.path.join(mod, "localization", "english",
@@ -3103,12 +3130,48 @@ class PaysFrame(ttk.Frame):
                     loc = re.sub(rf'^\s*{re.escape(name)}[^:\n]*:.*\n?', '', loc, flags=re.MULTILINE)
                     with open(yml_path, "w", encoding="utf-8-sig") as f:
                         f.write(loc)
+                
+                # Supprimer les localisations des personnages
+                char_loc_path = os.path.join(mod, "localization", "english",
+                                             "00_hmm_character_template_l_english.yml")
+                if os.path.exists(char_loc_path):
+                    with open(char_loc_path, "r", encoding="utf-8-sig") as f:
+                        char_loc = f.read()
+                    char_loc = re.sub(rf'^\s*character_{re.escape(name)}[^:\n]*:.*\n?', '', char_loc, flags=re.MULTILINE)
+                    char_loc = re.sub(rf'^\s*{re.escape(tag_lower)}_[^_]+_first[^:\n]*:.*\n?', '', char_loc, flags=re.MULTILINE)
+                    char_loc = re.sub(rf'^\s*{re.escape(tag_lower)}_[^_]+_last[^:\n]*:.*\n?', '', char_loc, flags=re.MULTILINE)
+                    with open(char_loc_path, "w", encoding="utf-8-sig") as f:
+                        f.write(char_loc)
+            
+            messagebox.showinfo("OK", f"Formation '{name}' supprimée ! ({removed_count} blocs)")
+        else:
+            # Pour les formations non-HMM (vanilla) : supprimer seulement create_military_formation
+            pattern = rf'create_military_formation\s*=\s*\{{[^{{]*?name\s*=\s*{re.escape(name)}'
+            m = re.search(pattern, content, re.DOTALL)
+            if not m:
+                messagebox.showerror("Erreur", f"Formation '{name}' introuvable dans le fichier")
+                return
 
-            # Supprimer tous les bâtiments militaires pour ce tag (même comportement que Create New Formation)
-            ftype_m = re.search(r'\btype\s*=\s*(army|fleet)\b', block)
-            ftype   = ftype_m.group(1) if ftype_m else "army"
-            building_type = "building_barrack" if ftype == "army" else "building_naval_base"
-            self._mil_remove_all_buildings_for_tag(tag, building_type)
+            start = m.start()
+            depth = 0
+            end = start
+            for i in range(start, len(content)):
+                if content[i] == '{':
+                    depth += 1
+                elif content[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+
+            block = content[start:end]
+
+            # Supprimer le bloc (+ éventuelle ligne vide avant)
+            pre = content[:start].rstrip('\n')
+            content = pre + '\n' + content[end:]
+
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(content)
 
         self._mil_load_formations()
 
