@@ -465,9 +465,14 @@ class PaysFrame(ttk.Frame):
         bd_e.insert(0, "YYYY.MM.JJ")
 
         ttk.Label(s4, text="Interest Group:", anchor="w").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=4)
-        ttk.Entry(s4, textvariable=self._gen_ruler_ig).grid(row=2, column=1, sticky="ew", padx=(0, 20), pady=4)
+        ig_values = ["ig_armed_forces", "ig_devout", "ig_industrialists", "ig_intelligentsia", 
+                     "ig_landowners", "ig_petty_bourgeoisie", "ig_rural_folk", "ig_trade_unions"]
+        ttk.Combobox(s4, textvariable=self._gen_ruler_ig, values=ig_values, state="readonly").grid(row=2, column=1, sticky="ew", padx=(0, 20), pady=4)
         ttk.Label(s4, text="Ideology:", anchor="w").grid(row=2, column=2, sticky="w", padx=(0, 6), pady=4)
-        ttk.Entry(s4, textvariable=self._gen_ruler_ideology).grid(row=2, column=3, sticky="ew", pady=4)
+        ideology_values = ["ideology_moderate", "ideology_traditionalist", "ideology_traditionalist_minoritarian",
+                           "ideology_nihilist", "ideology_republican_leader", "ideology_radical", "ideology_reformer",
+                           "ideology_feminist", "ideology_abolitionist", "ideology_slaver", "ideology_pacifist"]
+        ttk.Combobox(s4, textvariable=self._gen_ruler_ideology, values=ideology_values, state="readonly").grid(row=2, column=3, sticky="ew", pady=4)
 
         ruler_bot = ttk.Frame(s4)
         ruler_bot.grid(row=3, column=0, columnspan=4, sticky="w", pady=(4, 2))
