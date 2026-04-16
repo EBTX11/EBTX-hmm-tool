@@ -3081,32 +3081,73 @@ class PaysFrame(ttk.Frame):
             removed_count = 0
             
             # 1. Supprimer create_military_formation avec name = KEY
-            # Pattern qui capture le bloc entier
-            pattern1 = rf'(create_military_formation\s*=\s*\{{[^}}]*?name\s*=\s*{re.escape(key)}[^}}]*\}}[^}}]*\}})'
+            # Approche par comptage d'accolades pour gérer les blocs imbriqués (combat_unit multiples)
+            pattern1 = rf'create_military_formation\s*=\s*\{{[^}}]*?name\s*=\s*{re.escape(key)}'
             matches1 = list(re.finditer(pattern1, content, re.DOTALL))
             print(f"[DEBUG] Trouvé {len(matches1)} create_military_formation à supprimer")
             for m in matches1:
-                # Extraire le type pour les bâtiments
-                block = m.group(1)
+                # Trouver la fin du bloc en comptant les accolades
+                start = m.start()
+                depth = 0
+                end = start
+                for i in range(start, len(content)):
+                    if content[i] == '{':
+                        depth += 1
+                    elif content[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                
+                # Extraire le bloc pour détecter le type
+                block = content[start:end]
                 ftype_match = re.search(r'\btype\s*=\s*(army|fleet)\b', block)
                 if ftype_match:
                     ftype = ftype_match.group(1)
                     print(f"[DEBUG] Type détecté: {ftype}")
-            content = re.sub(pattern1, '', content, flags=re.DOTALL)
+                
+                # Supprimer le bloc
+                content = content[:start] + content[end:]
             removed_count += len(matches1)
             
             # 2. Supprimer create_character avec first_name = character_KEY ou save_scope_as = character_KEY
-            pattern2 = rf'(create_character\s*=\s*\{{[^}}]*?(?:first_name\s*=\s*{re.escape(char_key)}|save_scope_as\s*=\s*{re.escape(char_key)}|first_name\s*=\s*{re.escape(tag_lower)}_[^_]+_first)[^}}]*\}}[^}}]*\}})'
+            # Approche par comptage d'accolades
+            pattern2 = rf'create_character\s*=\s*\{{[^}}]*?(?:first_name\s*=\s*{re.escape(char_key)}|save_scope_as\s*=\s*{re.escape(char_key)}|first_name\s*=\s*{re.escape(tag_lower)}_[^_]+_first)'
             matches2 = list(re.finditer(pattern2, content, re.DOTALL))
             print(f"[DEBUG] Trouvé {len(matches2)} create_character à supprimer")
-            content = re.sub(pattern2, '', content, flags=re.DOTALL)
+            for m in matches2:
+                start = m.start()
+                depth = 0
+                end = start
+                for i in range(start, len(content)):
+                    if content[i] == '{':
+                        depth += 1
+                    elif content[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                content = content[:start] + content[end:]
             removed_count += len(matches2)
             
             # 3. Supprimer scope:character_KEY = { ... }
-            pattern3 = rf'(scope:{re.escape(char_key)}\s*=\s*\{{[^}}]*\}}[^}}]*\}})'
-            matches3 = list(re.finditer(pattern3, content, re.DOTALL))
+            # Approche par comptage d'accolades
+            pattern3 = rf'scope:{re.escape(char_key)}\s*=\s*\{{'
+            matches3 = list(re.finditer(pattern3, content))
             print(f"[DEBUG] Trouvé {len(matches3)} scope à supprimer")
-            content = re.sub(pattern3, '', content, flags=re.DOTALL)
+            for m in matches3:
+                start = m.start()
+                depth = 0
+                end = start
+                for i in range(start, len(content)):
+                    if content[i] == '{':
+                        depth += 1
+                    elif content[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                content = content[:start] + content[end:]
             removed_count += len(matches3)
             
             print(f"[DEBUG] Total supprimé: {removed_count} blocs")
