@@ -163,7 +163,7 @@ def parse_homelands_claims(states_path):
         for hm in re.finditer(r'add_homeland\s*=\s*cu:(\w+)', block):
             homelands.append(hm.group(1))
         for cm in re.finditer(r'add_claim\s*=\s*c:(\w+)', block):
-            claims.append(cm.group(1))
+            claims.append(cm.group(1).upper())
         if homelands or claims:
             result[state] = {'homelands': homelands, 'claims': claims}
         i = j
@@ -303,6 +303,16 @@ class MapFrame(ttk.Frame):
         self._selection_rect_start = None  # (x, y) du début du rectangle
         self._selection_rect_end = None    # (x, y) de la fin du rectangle
         self._selection_rect_id = None     # ID du rectangle sur le canvas
+        
+        # Variables pour stocker les derniers paramètres de création de pays
+        self._last_country_params = {
+            'color': "120 80 180",
+            'country_type': "recognized",
+            'tier': "kingdom",
+            'religion': "",
+            'cultures': [],
+            'capital': ""
+        }
         self._build()
 
     def _get_mod_map_data_dir(self):
@@ -976,7 +986,7 @@ class MapFrame(ttk.Frame):
             value = self._hl_var.get().strip()
             self._hl_var.set("")
         else:
-            value = self._cl_entry.get().strip().lower()
+            value = self._cl_entry.get().strip().upper()
             self._cl_entry.set("")
         if not value:
             return
@@ -1413,15 +1423,61 @@ class MapFrame(ttk.Frame):
                 if len(color_parts) == 3:
                     self._country_colors[tag] = (int(color_parts[0]), int(color_parts[1]), int(color_parts[2]))
 
+                # Sauvegarder les derniers paramètres (sauf TAG et nom)
+                self._last_country_params = {
+                    'color': color,
+                    'country_type': ctype,
+                    'tier': tier,
+                    'religion': religion,
+                    'cultures': cultures.copy(),
+                    'capital': capital
+                }
+
                 self._new_tag.set(tag)
                 self._display_map()
                 popup.destroy()
                 messagebox.showinfo("Succes", f"Pays {tag} cree avec succes !")
 
+            def _load_last_params():
+                """Charge les derniers paramètres dans les champs (sauf TAG et nom)."""
+                color_var.set(self._last_country_params['color'])
+                country_type_var.set(self._last_country_params['country_type'])
+                tier_var.set(self._last_country_params['tier'])
+                
+                # Réinitialiser les labels de religion et cultures
+                for w in rel_labels_frame.winfo_children():
+                    w.destroy()
+                for w in cult_labels_frame.winfo_children():
+                    w.destroy()
+                
+                religion_labels.clear()
+                culture_labels.clear()
+                
+                # Charger la religion
+                rel = self._last_country_params['religion']
+                if rel:
+                    religion_var.set(rel)
+                    religion_labels.append(rel)
+                    lbl = ttk.Label(rel_labels_frame, text=rel, font=("Consolas", 8))
+                    lbl.pack(side="left", padx=2)
+                
+                # Charger les cultures
+                for cult in self._last_country_params['cultures']:
+                    culture_labels.append(cult)
+                    lbl = ttk.Label(cult_labels_frame, text=cult, font=("Consolas", 8))
+                    lbl.pack(side="left", padx=2)
+                
+                # Charger la capitale si vide
+                if not capital_var.get().strip():
+                    capital_var.set(self._last_country_params['capital'])
+                
+                status_lbl.config(text="Derniers paramètres chargés (sauf TAG et nom)")
+
             # Boutons
             btn_frame = tk.Frame(popup, bg="#1e2030")
             btn_frame.pack(pady=15)
             tk.Button(btn_frame, text="Creer le pays", bg="#45475a", fg="#cdd6f4", font=("Segoe UI", 10, "bold"), width=14, height=1, command=_create_country).pack(side="left", padx=5)
+            tk.Button(btn_frame, text="Reprendre derniers", bg="#585b70", fg="#cdd6f4", font=("Segoe UI", 9), width=14, height=1, command=_load_last_params).pack(side="left", padx=5)
             tk.Button(btn_frame, text="Annuler", bg="#45475a", fg="#cdd6f4", font=("Segoe UI", 10), width=10, height=1, command=popup.destroy).pack(side="left", padx=5)
 
     def _auto_gen_tag(self, tag_var):
