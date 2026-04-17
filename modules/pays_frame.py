@@ -76,6 +76,7 @@ class PaysFrame(ttk.Frame):
         self._tab_generale(nb)
         self._tab_lois(nb)
         self._tab_techno_generale(nb)
+        self._tab_technologie_pays(nb)
         self._tab_diplomacy(nb)
         self._tab_power_blocs(nb)
         self._tab_military_formation(nb)
@@ -169,6 +170,9 @@ class PaysFrame(ttk.Frame):
             self._mil_tag_var.set(tag)
             self._mil_manage_tag.set(tag)
             self._mil_load_formations()
+        if hasattr(self, '_tech_pays_tag'):
+            self._tech_pays_tag.set(tag)
+            self._tech_pays_load()
 
     # ---------------- HELPERS DONNÉES ----------------
 
@@ -3938,3 +3942,184 @@ class PaysFrame(ttk.Frame):
         messagebox.showinfo("Succès", f"Population ajustée à {target:,}")
         # Réanalyser pour mettre à jour le total
         self._analyze_pop()
+
+    def _tab_technologie_pays(self, nb):
+        """Onglet pour gérer les technologies spécifiques d'un pays (effect_starting_technology_...)."""
+        f = ttk.Frame(nb)
+        nb.add(f, text="Technologie Pays")
+
+        # Liste des effets de technologie disponibles
+        self._tech_effects = [
+            "effect_starting_technology_tier_1_tech_hmm",
+            "effect_starting_technology_tier_2_tech_hmm",
+            "effect_starting_technology_tier_3_tech_hmm",
+            "effect_starting_technology_tier_4_tech_hmm",
+            "effect_starting_technology_tier_1_tech",
+            "effect_starting_technology_tier_2_tech",
+            "effect_starting_technology_tier_3_tech",
+            "effect_starting_technology_tier_4_tech",
+            "effect_starting_technology_tier_5_tech",
+            "effect_starting_technology_tier_6_tech",
+        ]
+
+        # Variables
+        self._tech_pays_tag = tk.StringVar()
+        self._tech_checkboxes = {}  # {effect_name: tk.BooleanVar}
+        self._tech_radio_var = tk.StringVar()  # Variable pour les boutons radio
+
+        # ── Barre du haut ──────────────────────────────────────
+        top = ttk.Frame(f)
+        top.pack(fill="x", padx=15, pady=(10, 5))
+
+        ttk.Label(top, text="Pays :").pack(side="left")
+        ttk.Entry(top, textvariable=self._tech_pays_tag, width=8, state="readonly",
+                  font=("Segoe UI", 10, "bold")).pack(side="left", padx=(4, 8))
+        ttk.Button(top, text="Charger", command=self._tech_pays_load).pack(side="left", padx=(0, 8))
+        self._tech_pays_status = ttk.Label(top, text="Sélectionne un pays dans la liste", foreground="#888")
+        self._tech_pays_status.pack(side="left", padx=4)
+        tk.Button(top, text="Appliquer", command=self._tech_pays_apply,
+                  bg="#1a7a1a", fg="white", activebackground="#2a9e2a", activeforeground="white",
+                  relief="flat", padx=10, pady=3).pack(side="right", padx=5)
+
+        ttk.Separator(f, orient="horizontal").pack(fill="x", padx=10, pady=(4, 0))
+
+        # ── Liste des effets avec boutons radio (exclusifs) ───────────────
+        effects_frame = ttk.LabelFrame(f, text="Effets de technologie disponibles (choix unique)", padding=(10, 6))
+        effects_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Créer un bouton radio pour chaque effet
+        for effect in self._tech_effects:
+            # Nom d'affichage court
+            display_name = effect.replace("effect_starting_technology_tier_", "Tier ").replace("_tech_hmm", " HMM").replace("_tech", " Std")
+            
+            rb = ttk.Radiobutton(effects_frame, text=display_name, variable=self._tech_radio_var, value=effect)
+            rb.pack(anchor="w", pady=2)
+            
+            # Tooltip avec le nom complet
+            rb.bind("<Enter>", lambda e, eff=effect: self._show_tooltip(e, eff))
+            rb.bind("<Leave>", lambda e: self._hide_tooltip())
+
+        # Auto-load si pays déjà sélectionné
+        if self._selected_country_tag:
+            self._tech_pays_tag.set(self._selected_country_tag)
+            self._tech_pays_load()
+
+    def _show_tooltip(self, event, text):
+        """Affiche une info-bulle."""
+        if not hasattr(self, '_tooltip'):
+            self._tooltip = tk.Toplevel(self)
+            self._tooltip.wm_overrideredirect(True)
+            self._tooltip_label = tk.Label(self._tooltip, text="", bg="#ffffcc", 
+                                           relief="solid", borderwidth=1, font=("Segoe UI", 8))
+            self._tooltip_label.pack()
+        self._tooltip_label.config(text=text)
+        x = event.widget.winfo_rootx()
+        y = event.widget.winfo_rooty() + event.widget.winfo_height()
+        self._tooltip.wm_geometry(f"+{x}+{y}")
+        self._tooltip.deiconify()
+
+    def _hide_tooltip(self):
+        """Cache l'info-bulle."""
+        if hasattr(self, '_tooltip'):
+            self._tooltip.withdraw()
+
+    def _tech_pays_load(self):
+        """Charge les effets de technologie existants pour le pays sélectionné."""
+        mod = self.config.mod_path
+        tag = self._tech_pays_tag.get().strip().upper()
+        if not mod or not tag:
+            return
+
+        # Réinitialiser toutes les cases à cocher
+        for var in self._tech_checkboxes.values():
+            var.set(False)
+
+        # Chercher le fichier du pays
+        countries_dir = os.path.join(mod, "common", "history", "countries")
+        if not os.path.exists(countries_dir):
+            self._tech_pays_status.config(text="Dossier countries introuvable", foreground="#f66")
+            return
+
+        file_path = None
+        for fname in os.listdir(countries_dir):
+            if fname.upper().startswith(tag.upper()):
+                file_path = os.path.join(countries_dir, fname)
+                break
+
+        if not file_path:
+            self._tech_pays_status.config(text=f"Fichier introuvable pour {tag}", foreground="#f66")
+            return
+
+        # Lire le fichier et chercher les effets
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Chercher tous les effect_starting_technology_...
+        for effect in self._tech_effects:
+            # Chercher "effect = yes" ou "effect_starting_technology_... = yes"
+            pattern = rf'{re.escape(effect)}\s*=\s*yes'
+            if re.search(pattern, content, re.IGNORECASE):
+                self._tech_checkboxes[effect].set(True)
+
+        self._tech_pays_status.config(text=f"Chargé: {tag}", foreground="#6af")
+
+    def _tech_pays_apply(self):
+        """Applique les effets de technologie sélectionnés au pays."""
+        mod = self.config.mod_path
+        tag = self._tech_pays_tag.get().strip().upper()
+        if not mod or not tag:
+            messagebox.showerror("Erreur", "Aucun pays sélectionné")
+            return
+
+        # Collecter les effets sélectionnés
+        selected_effects = [effect for effect, var in self._tech_checkboxes.items() if var.get()]
+
+        if not selected_effects:
+            messagebox.showwarning("Attention", "Aucun effet sélectionné")
+            return
+
+        # Chercher le fichier du pays
+        countries_dir = os.path.join(mod, "common", "history", "countries")
+        if not os.path.exists(countries_dir):
+            messagebox.showerror("Erreur", "Dossier countries introuvable")
+            return
+
+        file_path = None
+        for fname in os.listdir(countries_dir):
+            if fname.upper().startswith(tag.upper()):
+                file_path = os.path.join(countries_dir, fname)
+                break
+
+        if not file_path:
+            messagebox.showerror("Erreur", f"Fichier introuvable pour {tag}")
+            return
+
+        # Lire le contenu
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Supprimer tous les effect_starting_technology_... existants
+        for effect in self._tech_effects:
+            content = re.sub(rf'\s*{re.escape(effect)}\s*=\s*yes', '', content)
+
+        # Nettoyer les lignes vides multiples
+        content = re.sub(r'\n\s*\n+', '\n', content)
+
+        # Trouver le bloc du pays (c:TAG = { ... })
+        match = re.search(rf'(c:{re.escape(tag)}\s*\??=\s*\{{)', content)
+        if not match:
+            messagebox.showerror("Erreur", f"Bloc du pays {tag} introuvable")
+            return
+
+        # Insérer les nouveaux effets après l'accolade d'ouverture
+        insert_pos = match.end()
+        effects_lines = "\n        " + "\n        ".join(f"{effect} = yes" for effect in selected_effects)
+        
+        content = content[:insert_pos] + effects_lines + content[insert_pos:]
+
+        # Sauvegarder
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        self._tech_pays_status.config(text=f"Sauvegardé: {tag}", foreground="#6f6")
+        messagebox.showinfo("OK", f"Technologies appliquées pour {tag}\nEffets: {', '.join(selected_effects)}")
