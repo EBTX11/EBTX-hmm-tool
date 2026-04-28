@@ -11,6 +11,7 @@ from modules.pays_frame import PaysFrame
 from modules.character_frame import CharacterFrame
 from modules.map_frame import MapFrame
 from modules.buildpop_frame import BuildPopFrame
+from modules.statecheck_frame import StateCheckFrame
 
 
 # ============================================================
@@ -211,6 +212,7 @@ class EBTXApp:
         nav_items = [
             ("Config",         "config"),
             ("Carte",          "carte"),
+            ("State Check",    "statecheck"),
             ("Building/Pop",   "buildpop"),
             ("Pays",           "pays"),
             ("Personnages",    "perso"),
@@ -237,6 +239,7 @@ class EBTXApp:
             self.content, self.config, on_save=self._refresh_topbar
         )
         self._frames["carte"]    = MapFrame(self.content, self.config)
+        self._frames["statecheck"] = StateCheckFrame(self.content, self.config)
         self._frames["buildpop"] = BuildPopFrame(self.content, self.config)
         self._frames["pays"]     = PaysFrame(self.content, self.config)
         self._frames["perso"]    = CharacterFrame(self.content, self.config)
