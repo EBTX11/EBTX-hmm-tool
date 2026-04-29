@@ -245,9 +245,13 @@ class StateCheckFrame(ttk.Frame):
                         provinces_to_add[state_name] = []
                     provinces_to_add[state_name].append(p)
 
+        # États présents dans state_regions mais absents de 00_states.txt
+        states_only_in_sr = set(sr_provinces.keys()) - set(states_provinces.keys())
+
         # Afficher les résultats
         total_to_move = sum(len(provs) for states in provinces_to_move.values() for provs in states.values())
         total_to_add = sum(len(provs) for provs in provinces_to_add.values())
+        total_missing = len(missing_states) + len(states_only_in_sr)
 
         # Summary
         self._summary_listbox.insert("end", f"=== RÉSUMÉ ===")
@@ -259,7 +263,8 @@ class StateCheckFrame(ttk.Frame):
         self._summary_listbox.insert("end", "")
         self._summary_listbox.insert("end", f"Provinces à déplacer: {total_to_move}")
         self._summary_listbox.insert("end", f"Provinces à ajouter: {total_to_add}")
-        self._summary_listbox.insert("end", f"États manquants: {len(missing_states)}")
+        self._summary_listbox.insert("end", f"États seulement dans 00_states.txt: {len(missing_states)}")
+        self._summary_listbox.insert("end", f"États seulement dans state_regions: {len(states_only_in_sr)}")
 
         # Détail
         self._detail_listbox.insert("end", "=== PROVINCES À DÉPLACER ===")
@@ -286,9 +291,11 @@ class StateCheckFrame(ttk.Frame):
 
         self._detail_listbox.insert("end", "")
         self._detail_listbox.insert("end", "=== ÉTATS MANQUANTS ===")
-        if missing_states:
+        if missing_states or states_only_in_sr:
             for s in sorted(missing_states):
-                self._detail_listbox.insert("end", f"  ! {s}")
+                self._detail_listbox.insert("end", f"  ! {s} (dans 00_states.txt)")
+            for s in sorted(states_only_in_sr):
+                self._detail_listbox.insert("end", f"  + {s} (dans state_regions)")
         else:
             self._detail_listbox.insert("end", "  (Aucun)")
 
@@ -364,14 +371,17 @@ class StateCheckFrame(ttk.Frame):
             self._sc_add_button.config(state="disabled")
         
         if total_to_move == 0 and total_to_add == 0:
-            if len(missing_states) > 0:
-                self._sc_status.config(text=f"Terminé - {len(missing_states)} état(s) manquants", 
+            if total_missing > 0:
+                self._sc_status.config(text=f"Terminé - {total_missing} état(s) manquants",
                                         foreground="#f9e2af")
             else:
-                self._sc_status.config(text="Analyse terminée - Tout est OK !", 
+                self._sc_status.config(text="Analyse terminée - Tout est OK !",
                                         foreground="#a6e3a1")
 
-        self._sc_stats_label.config(text=f"Déplacer: {total_to_move} | Ajouter: {total_to_add} | Manquants: {len(missing_states)}")
+        self._sc_stats_label.config(
+            text=f"Déplacer: {total_to_move} | Ajouter: {total_to_add} | "
+                 f"00_states seul: {len(missing_states)} | SR seul: {len(states_only_in_sr)}"
+        )
         
         # Mettre à jour le label des chemins
         backup_path = sr_dir + "_backup" if self._sc_backup_var.get() else "Désactivée"
@@ -632,18 +642,20 @@ class StateCheckFrame(ttk.Frame):
                 new_content = content[:k-1] + "\n\t\towned_provinces = {" + new_provs + "}\n" + content[k-1:]
                 return new_content
         else:
-            # Créer un nouveau create_state avec le bon tag
-            new_create = f'''
-		create_state = {{
-			country = {tag}
-			owned_provinces = {{ {" ".join(self._fmt_prov(p) for p in provinces)} }}
-		}}'''
-            
-            # Insérer après le dernier élément de l'état
-            # Trouver la dernière ligne de l'état
-            insert_pos = i - 1
-            new_content = content[:insert_pos] + new_create + content[insert_pos:]
-            
+            # Créer un nouveau create_state juste après s:STATE_XXX = {
+            # Détecter l'indentation depuis les blocs create_state existants dans le fichier
+            indent_match = re.search(r'\n([ \t]*)create_state', content[block_start:i])
+            indent = indent_match.group(1) if indent_match else '\t\t\t'
+            inner = indent + '\t'
+
+            new_create = (
+                f'\n{indent}create_state = {{\n'
+                f'{inner}country = {tag}\n'
+                f'{inner}owned_provinces = {{ {" ".join(self._fmt_prov(p) for p in provinces)} }}\n'
+                f'{indent}}}'
+            )
+
+            new_content = content[:block_start] + new_create + content[block_start:]
             return new_content
 
     def _find_state_regions_file(self, sr_dir, state_name):
