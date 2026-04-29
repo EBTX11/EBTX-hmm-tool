@@ -139,15 +139,54 @@ class StateCheckFrame(ttk.Frame):
 
         # Parser 00_states.txt
         states_provinces = self._parse_states_provinces(states_path)
-
+        
         # Parser state_regions - créer une map province -> état
         sr_provinces = self._parse_state_regions_provinces(sr_dir)
 
+        # Debug: afficher quelques provinces de chaque fichier
+        self._detail_listbox.insert("end", "=== DEBUG ===")
+        self._detail_listbox.insert("end", f"mod: {mod}")
+        self._detail_listbox.insert("end", f"00_states.txt: {states_path}")
+        self._detail_listbox.insert("end", f"state_regions: {sr_dir}")
+        
+        # Afficher quelques provinces de 00_states.txt
+        first_state = list(states_provinces.keys())[0] if states_provinces else None
+        if first_state:
+            sample_provs = list(states_provinces[first_state])[:3]
+            self._detail_listbox.insert("end", f"Exemples de {first_state}: {sample_provs}")
+        
+        # Afficher quelques provinces de state_regions
+        first_sr_state = list(sr_provinces.keys())[0] if sr_provinces else None
+        if first_sr_state:
+            sr_sample_provs = list(sr_provinces[first_sr_state])[:3]
+            self._detail_listbox.insert("end", f"Exemples de {first_sr_state}: {sr_sample_provs}")
+        
         # Créer une map {province: état} pour toutes les provinces dans state_regions
         prov_to_state_map = {}
         for state_name, provs in sr_provinces.items():
             for p in provs:
                 prov_to_state_map[p] = state_name
+        
+        # Afficher le nombre de provinces dans la map
+        self._detail_listbox.insert("end", f"Nombre de provinces dans map: {len(prov_to_state_map)}")
+        
+        # Test: vérifier si une province de 00_states existe dans la map
+        if first_state and states_provinces.get(first_state):
+            test_prov = list(states_provinces[first_state])[0]
+            self._detail_listbox.insert("end", f"Test: {test_prov}")
+            self._detail_listbox.insert("end", f"  existe dans map: {test_prov in prov_to_state_map}")
+            
+            # Test avec differentes variations
+            test_prov_upper = test_prov.upper()
+            test_prov_lower = test_prov.lower()
+            self._detail_listbox.insert("end", f"  (upper) {test_prov_upper} existe: {test_prov_upper in prov_to_state_map}")
+            self._detail_listbox.insert("end", f"  (lower) {test_prov_lower} existe: {test_prov_lower in prov_to_state_map}")
+            
+            if test_prov in prov_to_state_map:
+                self._detail_listbox.insert("end", f"  -> état: {prov_to_state_map[test_prov]}")
+
+        self._detail_listbox.insert("end", "")
+        self._detail_listbox.insert("end", "=== ANALYSE ===")
 
         # Analyser chaque province dans 00_states.txt
         provinces_to_move = {}  # {state_name: {correct_state: [provinces]}}
@@ -258,7 +297,11 @@ class StateCheckFrame(ttk.Frame):
         with open(states_path, "r", encoding="utf-8-sig") as fh:
             content = fh.read()
 
-        prov_pat = re.compile(r'x[0-9A-Fa-f]{6}')
+        # Regex pour provinces sans guillemets
+        prov_pat = re.compile(r'\bx[0-9A-Fa-f]{6}\b')
+        
+        debug_provs = []
+        
         for sm in re.finditer(r's:(STATE_\w+)\s*=\s*\{', content):
             state = sm.group(1)
             start = sm.end()
@@ -271,20 +314,31 @@ class StateCheckFrame(ttk.Frame):
 
             provs = set()
             for pm in prov_pat.finditer(state_block):
-                p = "x" + pm.group(0)[1:].upper()
+                # Simpler: just take the whole match and uppercase it
+                p = pm.group(0).upper()
                 provs.add(p)
+                
+                # Debug: collect first few provinces from first state
+                if len(debug_provs) < 10 and not result:
+                    debug_provs.append(p)
 
             if provs:
                 result[state] = provs
 
+        # Debug output
+        if debug_provs:
+            print(f"[DEBUG] First provinces from 00_states.txt: {debug_provs}")
+        
         return result
 
     def _parse_state_regions_provinces(self, sr_dir):
         """Parse les fichiers state_regions et retourne un dict {state_name: set_of_provinces}."""
         result = {}
-        # Regex pour les deux formats : "x123456" ou x123456
-        prov_pat = re.compile(r'"?x[0-9A-Fa-f]{6}"?')
+        # Regex pour provinces avec ou sans guillemets
+        prov_pat = re.compile(r'"?x([0-9A-Fa-f]{6})"?')
         state_pat = re.compile(r'^(STATE_\w+)\s*=\s*\{', re.MULTILINE)
+        
+        debug_provs = []
 
         for fname in sorted(os.listdir(sr_dir)):
             if not fname.endswith(".txt"):
@@ -303,10 +357,21 @@ class StateCheckFrame(ttk.Frame):
                 block = content[sm.start():i]
                 provs = set()
                 for pm in prov_pat.finditer(block):
-                    p = pm.group(0).strip('"').upper()
+                    # Take group(1) to get just the hex part, then add x and uppercase
+                    hex_part = pm.group(1)
+                    p = "X" + hex_part.upper()  # Force uppercase X prefix
                     provs.add(p)
+                    
+                    # Debug: collect first few provinces from first state
+                    if len(debug_provs) < 10 and not result:
+                        debug_provs.append(p)
+
                 result[state] = provs
 
+        # Debug output
+        if debug_provs:
+            print(f"[DEBUG] First provinces from state_regions: {debug_provs}")
+            
         return result
 
     def _apply_state_corrections(self):
