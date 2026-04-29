@@ -101,11 +101,34 @@ class StateCheckFrame(ttk.Frame):
                                           font=("Segoe UI", 9))
         self._sc_stats_label.pack(padx=10, pady=5)
 
-        # Bouton appliquer
-        self._sc_apply_button = ttk.Button(bottom_frame, text="Appliquer les corrections",
-                                            command=self._apply_state_corrections,
-                                            state="disabled", style="Accent.TButton")
-        self._sc_apply_button.pack(side="right", padx=5)
+        # Chemins (affichés après le screening)
+        self._sc_paths_label = ttk.Label(stats_frame, text="Chemins non analysés",
+                                          font=("Segoe UI", 8), foreground="#6c7086", wraplength=200)
+        self._sc_paths_label.pack(padx=10, pady=(5, 0))
+
+        # Boutons appliquer - Deux boutons séparés
+        # Style pour bouton déplacer (orange)
+        style = ttk.Style()
+        style.configure("Move.TButton", background="#f9e2af", foreground="#1e1e2e", 
+                        font=("Segoe UI", 9, "bold"))
+        style.map("Move.TButton", background=[("active", "#f5d76e")])
+        
+        # Style pour bouton ajouter (vert)
+        style.configure("Add.TButton", background="#a6e3a1", foreground="#1e1e2e", 
+                        font=("Segoe UI", 9, "bold"))
+        style.map("Add.TButton", background=[("active", "#94e3a1")])
+        
+        # Bouton Déplacer (gauche) - modifie 00_states.txt
+        self._sc_move_button = ttk.Button(bottom_frame, text="Déplacer dans 00_states.txt",
+                                            command=self._move_provinces,
+                                            state="disabled", style="Move.TButton")
+        self._sc_move_button.pack(side="right", padx=5)
+        
+        # Bouton Ajouter (droite) - modifie state_regions
+        self._sc_add_button = ttk.Button(bottom_frame, text="Ajouter à state_regions",
+                                           command=self._add_provinces,
+                                           state="disabled", style="Add.TButton")
+        self._sc_add_button.pack(side="right", padx=5)
 
         # Variables pour stocker les résultats
         self._sc_missing_provinces = {}
@@ -269,18 +292,78 @@ class StateCheckFrame(ttk.Frame):
         else:
             self._detail_listbox.insert("end", "  (Aucun)")
 
-        # Stocker les résultats pour les corrections
         self._sc_missing_provinces = provinces_to_move
+
+        # Construire une map {province_upper: tag} en parsant chaque create_state individuellement
+        # Nécessaire car un état peut avoir plusieurs create_state avec des tags différents
+        with open(states_path, "r", encoding="utf-8-sig") as fh:
+            states_content = fh.read()
+
+        prov_to_tag = {}  # {province_upper: tag}
+        _prov_pat = re.compile(r'\b[xX][0-9A-Fa-f]{6}\b')
+        _cs_pat = re.compile(r'create_state\s*=\s*\{')
+
+        for sm in re.finditer(r's:(STATE_\w+)\s*=\s*\{', states_content):
+            start = sm.end()
+            depth, i = 1, start
+            while i < len(states_content) and depth > 0:
+                if states_content[i] == "{": depth += 1
+                elif states_content[i] == "}": depth -= 1
+                i += 1
+            state_block = states_content[start:i - 1]
+
+            # Parcourir chaque create_state du bloc
+            for cs_m in _cs_pat.finditer(state_block):
+                cs_start = cs_m.end()
+                depth2, j = 1, cs_start
+                while j < len(state_block) and depth2 > 0:
+                    if state_block[j] == "{": depth2 += 1
+                    elif state_block[j] == "}": depth2 -= 1
+                    j += 1
+                cs_block = state_block[cs_start:j - 1]
+
+                country_match = re.search(r'country\s*=\s*(c:\w+)', cs_block)
+                if not country_match:
+                    continue
+                tag = country_match.group(1)
+
+                for pm in _prov_pat.finditer(cs_block):
+                    prov_to_tag[pm.group(0).upper()] = tag
+
+        # Construire provinces_to_move_with_tags en groupant par tag d'origine réel
+        # Structure: {source_state: {target_state: {tag: [provinces]}}}
+        provinces_to_move_with_tags = {}
+        for source_state, data in provinces_to_move.items():
+            for target_state, provs in data.items():
+                for prov in provs:
+                    tag = prov_to_tag.get(prov.upper(), "UNKNOWN")
+                    provinces_to_move_with_tags \
+                        .setdefault(source_state, {}) \
+                        .setdefault(target_state, {}) \
+                        .setdefault(tag, []) \
+                        .append(prov)
+        
+        self._sc_missing_provinces_with_tags = provinces_to_move_with_tags
         self._sc_orphelines = provinces_to_add
         self._sc_missing_states = missing_states
 
-        # Mettre à jour le statut
-        if total_to_move > 0 or total_to_add > 0:
-            self._sc_apply_button.config(state="normal")
-            self._sc_status.config(text=f"Prêt: {total_to_move} à déplacer, {total_to_add} à ajouter", 
+        # Mettre à jour le statut et les boutons
+        if total_to_move > 0:
+            self._sc_move_button.config(state="normal")
+            self._sc_status.config(text=f"Prêt: {total_to_move} provinces à déplacer", 
                                     foreground="#f9e2af")
         else:
-            self._sc_apply_button.config(state="disabled")
+            self._sc_move_button.config(state="disabled")
+        
+        if total_to_add > 0:
+            self._sc_add_button.config(state="normal")
+            if total_to_move == 0:
+                self._sc_status.config(text=f"Prêt: {total_to_add} provinces à ajouter", 
+                                        foreground="#a6e3a1")
+        else:
+            self._sc_add_button.config(state="disabled")
+        
+        if total_to_move == 0 and total_to_add == 0:
             if len(missing_states) > 0:
                 self._sc_status.config(text=f"Terminé - {len(missing_states)} état(s) manquants", 
                                         foreground="#f9e2af")
@@ -289,6 +372,14 @@ class StateCheckFrame(ttk.Frame):
                                         foreground="#a6e3a1")
 
         self._sc_stats_label.config(text=f"Déplacer: {total_to_move} | Ajouter: {total_to_add} | Manquants: {len(missing_states)}")
+        
+        # Mettre à jour le label des chemins
+        backup_path = sr_dir + "_backup" if self._sc_backup_var.get() else "Désactivée"
+        self._sc_paths_label.config(
+            text=f"00_states: ...states/00_states.txt\nstate_regions: ...map_data/state_regions\nSauvegarde: {backup_path}",
+            foreground="#89b4fa"
+        )
+        
         self._sc_button.config(state="normal")
 
     def _parse_states_provinces(self, states_path):
@@ -297,8 +388,8 @@ class StateCheckFrame(ttk.Frame):
         with open(states_path, "r", encoding="utf-8-sig") as fh:
             content = fh.read()
 
-        # Regex pour provinces sans guillemets
-        prov_pat = re.compile(r'\bx[0-9A-Fa-f]{6}\b')
+        # Regex pour provinces sans guillemets (détecte x et X)
+        prov_pat = re.compile(r'\b[xX][0-9A-Fa-f]{6}\b', re.IGNORECASE)
         
         debug_provs = []
         
@@ -334,8 +425,8 @@ class StateCheckFrame(ttk.Frame):
     def _parse_state_regions_provinces(self, sr_dir):
         """Parse les fichiers state_regions et retourne un dict {state_name: set_of_provinces}."""
         result = {}
-        # Regex pour provinces avec ou sans guillemets
-        prov_pat = re.compile(r'"?x([0-9A-Fa-f]{6})"?')
+        # Regex pour provinces avec ou sans guillemets (détecte x et X)
+        prov_pat = re.compile(r'"?[xX]([0-9A-Fa-f]{6})"?', re.IGNORECASE)
         state_pat = re.compile(r'^(STATE_\w+)\s*=\s*\{', re.MULTILINE)
         
         debug_provs = []
@@ -386,10 +477,28 @@ class StateCheckFrame(ttk.Frame):
             self._sc_status.config(text="Erreur: Dossiers non configurés", foreground="#f38ba8")
             return
 
-        # Confirmation
+        # Compter les fichiers qui seront modifiés
+        files_to_modify = set()
+        for state_name, data in self._sc_missing_provinces.items():
+            for correct_state in data.keys():
+                fpath = self._find_state_regions_file(sr_dir, correct_state)
+                if fpath:
+                    files_to_modify.add(os.path.basename(fpath))
+        
+        for state_name in self._sc_orphelines.keys():
+            fpath = self._find_state_regions_file(sr_dir, state_name)
+            if fpath:
+                files_to_modify.add(os.path.basename(fpath))
+        
+        total_provs = sum(len(provs) for states in self._sc_missing_provinces.values() for provs in states.values())
+        total_provs += sum(len(provs) for provs in self._sc_orphelines.values())
+        
+        # Confirmation détaillée
         confirm = messagebox.askyesno("Confirmer", 
-            "Voulez-vous vraiment ajouter les provinces aux fichiers state_regions?\n"
-            "Cela modifiera les fichiers state_regions.")
+            f"Fichiers state_regions qui seront modifiés ({len(files_to_modify)} fichiers):\n"
+            + ", ".join(sorted(files_to_modify)[:5]) + ("..." if len(files_to_modify) > 5 else "") + f"\n\n"
+            f"Nombre de provinces à ajouter: {total_provs}\n"
+            f"Fichiers modifiés: {sr_dir}")
         if not confirm:
             return
 
@@ -434,6 +543,108 @@ class StateCheckFrame(ttk.Frame):
         messagebox.showinfo("State Check", 
             f"{corrections_made} province(s) ajoutée(s) aux fichiers state_regions.\n"
             f"Sauvegardes créées si cochée.")
+
+    @staticmethod
+    def _fmt_prov(p):
+        """Normalise une province au format du fichier : x minuscule + hex majuscule (ex: x26DB64)."""
+        return 'x' + p[1:].upper()
+
+    def _add_provinces_with_tag(self, content, state_name, provinces, tag):
+        """Ajoute les provinces à un état dans 00_states.txt avec le bon tag country.
+
+        Si l'état a déjà un create_state avec ce tag, ajoute les provinces à owned_provinces.
+        Sinon, crée un nouveau create_state avec le tag et les provinces.
+        """
+        prov_pat = re.compile(r'\b[xX][0-9A-Fa-f]{6}\b')
+
+        # Trouver le bloc de l'état
+        state_match = re.search(rf's:{state_name}\s*=\s*\{{', content)
+        if not state_match:
+            return content
+
+        block_start = state_match.end()
+        depth, i = 1, block_start
+        while i < len(content) and depth > 0:
+            if content[i] == "{": depth += 1
+            elif content[i] == "}": depth -= 1
+            i += 1
+
+        state_block = content[block_start:i-1]
+
+        # Chercher s'il y a déjà un create_state avec ce tag
+        # Pattern: create_state = { country = c:XXX
+        create_state_pattern = re.compile(r'create_state\s*=\s*\{[^}]*country\s*=\s*' + re.escape(tag), re.DOTALL)
+        existing_create = create_state_pattern.search(state_block)
+        
+        if existing_create:
+            # Ajouter les provinces au create_state existant
+            # Trouver le bloc du create_state
+            cs_start = block_start + existing_create.start()
+            cs_block_start = block_start + existing_create.end()
+            
+            # Trouver la fin du create_state
+            depth_cs, k = 1, cs_block_start
+            while k < i and depth_cs > 0:
+                if content[k] == "{": depth_cs += 1
+                elif content[k] == "}": depth_cs -= 1
+                k += 1
+            
+            # Chercher owned_provinces dans ce create_state
+            create_subblock = content[cs_block_start:k-1]
+            owned_match = re.search(r'owned_provinces\s*=\s*\{', create_subblock)
+            
+            if owned_match:
+                # Ajouter les provinces à owned_provinces existant
+                prov_start = cs_block_start + owned_match.end()
+                
+                # Trouver la fin de la liste de provinces
+                depth2, j = 1, prov_start
+                while j < k and depth2 > 0:
+                    if content[j] == "{": depth2 += 1
+                    elif content[j] == "}": depth2 -= 1
+                    j += 1
+                
+                # Extraire les provinces existantes
+                existing_provs_block = content[prov_start:j-1]
+                
+                # Parser les provinces existantes
+                existing_set = set()
+                for pm in prov_pat.finditer(existing_provs_block):
+                    existing_set.add(pm.group(0).upper())
+                
+                # Ajouter les provinces manquantes
+                provs_to_add = []
+                for p in provinces:
+                    if p.upper() not in existing_set:
+                        provs_to_add.append(self._fmt_prov(p))
+
+                if not provs_to_add:
+                    return content
+
+                # Ajouter les nouvelles provinces
+                new_provs_str = " " + " ".join(provs_to_add) + " "
+                new_content = content[:prov_start] + new_provs_str + existing_provs_block + content[j-1:]
+
+                return new_content
+            else:
+                # owned_provinces n'existe pas, le créer
+                new_provs = " " + " ".join(self._fmt_prov(p) for p in provinces) + " "
+                new_content = content[:k-1] + "\n\t\towned_provinces = {" + new_provs + "}\n" + content[k-1:]
+                return new_content
+        else:
+            # Créer un nouveau create_state avec le bon tag
+            new_create = f'''
+		create_state = {{
+			country = {tag}
+			owned_provinces = {{ {" ".join(self._fmt_prov(p) for p in provinces)} }}
+		}}'''
+            
+            # Insérer après le dernier élément de l'état
+            # Trouver la dernière ligne de l'état
+            insert_pos = i - 1
+            new_content = content[:insert_pos] + new_create + content[insert_pos:]
+            
+            return new_content
 
     def _find_state_regions_file(self, sr_dir, state_name):
         """Trouve le fichier state_regions qui contient l'état spécifié."""
@@ -511,3 +722,239 @@ class StateCheckFrame(ttk.Frame):
                 fh.write(new_content)
 
             self._detail_listbox.insert("end", f"+ {state_name}: {len(new_provs)} provinces ajoutées")
+
+    def _move_provinces(self):
+        """Déplace les provinces dans 00_states.txt (état source -> état cible)."""
+        if not self._sc_missing_provinces_with_tags:
+            return
+
+        mod = self.config.mod_path
+        if not mod:
+            self._sc_status.config(text="Erreur: Dossier mod non configuré", foreground="#f38ba8")
+            return
+
+        states_path = os.path.join(mod, "common/history/states/00_states.txt")
+        
+        if not os.path.exists(states_path):
+            self._sc_status.config(text="Erreur: 00_states.txt introuvable", foreground="#f38ba8")
+            return
+
+        # Compter les provinces à déplacer (avec la structure enrichie)
+        total_to_move = sum(len(provs) for data in self._sc_missing_provinces_with_tags.values() 
+                          for tags_data in data.values() 
+                          for provs in tags_data.values())
+        
+        # Confirmation détaillée
+        states_list = []
+        for wrong_state, data in self._sc_missing_provinces_with_tags.items():
+            for correct_state, tags_data in data.items():
+                for tag, provs in tags_data.items():
+                    states_list.append(f"{wrong_state} -> {correct_state} [{tag}]: {len(provs)} provinces")
+        
+        confirm = messagebox.askyesno("Confirmer", 
+            f"Provinces à déplacer dans 00_states.txt:\n"
+            + "\n".join(states_list[:10]) + ("..." if len(states_list) > 10 else "") + f"\n\n"
+            f"Nombre total de provinces: {total_to_move}\n"
+            f"Fichier modifié: {states_path}")
+        if not confirm:
+            return
+
+        # Sauvegarde de 00_states.txt
+        if self._sc_backup_var.get():
+            backup_path = states_path + "_backup"
+            shutil.copy2(states_path, backup_path)
+            self._summary_listbox.insert("end", "")
+            self._summary_listbox.insert("end", f"Sauvegarde 00_states.txt: {backup_path}")
+
+        # Lire le fichier
+        with open(states_path, "r", encoding="utf-8-sig") as fh:
+            content = fh.read()
+
+        # Pour chaque déplacement avec les tags
+        corrections_made = 0
+        for wrong_state, data in self._sc_missing_provinces_with_tags.items():
+            for correct_state, tags_data in data.items():
+                for tag, provs in tags_data.items():
+                    # Supprimer les provinces de l'état source
+                    content = self._remove_provinces_from_state(content, wrong_state, provs)
+                    # Ajouter les provinces à l'état cible avec le bon tag
+                    content = self._add_provinces_with_tag(content, correct_state, provs, tag)
+                    corrections_made += len(provs)
+                    
+                    self._detail_listbox.insert("end", f"-> {wrong_state} -> {correct_state} [{tag}]: {len(provs)} provinces déplacées")
+
+        # Écrire le fichier modifié
+        with open(states_path, "w", encoding="utf-8-sig") as fh:
+            fh.write(content)
+
+        self._sc_status.config(text=f"Déplacement terminé: {corrections_made} provinces", 
+                                foreground="#f9e2af")
+        self._sc_move_button.config(state="disabled")
+
+        messagebox.showinfo("State Check", 
+            f"{corrections_made} province(s) déplacée(s) dans 00_states.txt.\n"
+            f"Sauvegarde créée si cochée.")
+
+    def _remove_provinces_from_state(self, content, state_name, provinces):
+        """Supprime les provinces spécifiées d'un état dans 00_states.txt.
+
+        Opère sur l'ensemble du bloc d'état pour gérer les états avec
+        plusieurs blocs create_state (chacun ayant son propre owned_provinces).
+        """
+        state_match = re.search(rf's:{state_name}\s*=\s*\{{', content)
+        if not state_match:
+            return content
+
+        block_start = state_match.end()
+        depth, i = 1, block_start
+        while i < len(content) and depth > 0:
+            if content[i] == "{": depth += 1
+            elif content[i] == "}": depth -= 1
+            i += 1
+        block_end = i - 1
+
+        state_block = content[block_start:block_end]
+        result_block = state_block
+
+        for prov in provinces:
+            prov_upper = prov.upper()
+            # Supprime la province partout dans le bloc (word boundary, insensible à la casse)
+            result_block = re.sub(r'\b' + re.escape(prov_upper) + r'\b', '', result_block, flags=re.IGNORECASE)
+
+        # Nettoyer les espaces doubles (sans toucher aux tabs d'indentation en début de ligne)
+        result_block = re.sub(r'[ ]{2,}', ' ', result_block)
+        result_block = re.sub(r' $', '', result_block, flags=re.MULTILINE)
+
+        return content[:block_start] + result_block + content[block_end:]
+
+    def _add_provinces_to_state_in_states(self, content, state_name, provinces):
+        """Ajoute les provinces à un état dans 00_states.txt."""
+        prov_pat = re.compile(r'\bx[0-9A-Fa-f]{6}\b')
+        
+        # Trouver le bloc de l'état
+        state_match = re.search(rf's:{state_name}\s*=\s*\{{', content)
+        if not state_match:
+            return content
+            
+        block_start = state_match.end()
+        depth, i = 1, block_start
+        while i < len(content) and depth > 0:
+            if content[i] == "{": depth += 1
+            elif content[i] == "}": depth -= 1
+            i += 1
+        
+        state_block = content[block_start:i-1]
+        
+        # Trouver la ligne "owned_provinces = {"
+        owned_match = re.search(r'owned_provinces\s*=\s*\{', state_block)
+        if not owned_match:
+            # Créer la section si elle n'existe pas
+            create_match = re.search(r'create_state\s*=\s*\{', state_block)
+            if create_match:
+                # Trouver la fin du create_state
+                create_start = block_start + create_match.end()
+                depth3, k = 1, create_start
+                while k < i and depth3 > 0:
+                    if content[k] == "{": depth3 += 1
+                    elif content[k] == "}": depth3 -= 1
+                    k += 1
+                
+                # Insérer owned_provinces avant la fermeture
+                new_provs = " " + " ".join(provinces) + " "
+                new_content = content[:k-1] + "\n\t\towned_provinces = {" + new_provs + "}\n" + content[k-1:]
+                return new_content
+            return content
+            
+        prov_start = block_start + owned_match.end()
+        
+        # Trouver la fin de la liste de provinces
+        depth2, j = 1, prov_start
+        while j < i and depth2 > 0:
+            if content[j] == "{": depth2 += 1
+            elif content[j] == "}": depth2 -= 1
+            j += 1
+        
+        # Extraire les provinces existantes
+        existing_provs_block = content[prov_start:j-1]
+        
+        # Parser les provinces existantes
+        existing_set = set()
+        for pm in prov_pat.finditer(existing_provs_block):
+            existing_set.add(pm.group(0).upper())
+        
+        # Ajouter les provinces manquantes
+        provs_to_add = []
+        for p in provinces:
+            if p.upper() not in existing_set:
+                provs_to_add.append(p)
+        
+        if not provs_to_add:
+            return content
+        
+        # Ajouter les nouvelles provinces
+        new_provs_str = " " + " ".join(provs_to_add) + " "
+        new_content = content[:prov_start] + new_provs_str + existing_provs_block + content[j-1:]
+        
+        return new_content
+
+    def _add_provinces(self):
+        """Ajoute les provinces aux fichiers state_regions."""
+        if not self._sc_orphelines:
+            return
+
+        mod = self.config.mod_path
+        sr_dir = self._get_state_regions_dir()
+
+        if not mod or not sr_dir or not os.path.exists(sr_dir):
+            self._sc_status.config(text="Erreur: Dossiers non configurés", foreground="#f38ba8")
+            return
+
+        # Compter les fichiers qui seront modifiés
+        files_to_modify = set()
+        for state_name in self._sc_orphelines.keys():
+            fpath = self._find_state_regions_file(sr_dir, state_name)
+            if fpath:
+                files_to_modify.add(os.path.basename(fpath))
+        
+        total_provs = sum(len(provs) for provs in self._sc_orphelines.values())
+        
+        # Confirmation détaillée
+        confirm = messagebox.askyesno("Confirmer", 
+            f"Fichiers state_regions qui seront modifiés ({len(files_to_modify)} fichiers):\n"
+            + ", ".join(sorted(files_to_modify)[:5]) + ("..." if len(files_to_modify) > 5 else "") + f"\n\n"
+            f"Nombre de provinces à ajouter: {total_provs}\n"
+            f"Fichiers modifiés: {sr_dir}")
+        if not confirm:
+            return
+
+        # Sauvegarde si cochée
+        if self._sc_backup_var.get():
+            backup_dir = sr_dir + "_backup"
+            if not os.path.exists(backup_dir):
+                os.makedirs(backup_dir)
+            for fname in os.listdir(sr_dir):
+                if fname.endswith(".txt"):
+                    src = os.path.join(sr_dir, fname)
+                    dst = os.path.join(backup_dir, fname)
+                    shutil.copy2(src, dst)
+            self._summary_listbox.insert("end", "")
+            self._summary_listbox.insert("end", f"Sauvegarde state_regions: {backup_dir}")
+
+        # Appliquer les corrections pour provinces_orphelines
+        corrections_made = 0
+
+        for state_name, provs in self._sc_orphelines.items():
+            file_path = self._find_state_regions_file(sr_dir, state_name)
+            if not file_path:
+                self._detail_listbox.insert("end", f"ATTENTION: {state_name} non trouvé")
+                continue
+            self._add_provinces_to_state(file_path, state_name, provs)
+            corrections_made += len(provs)
+
+        self._sc_status.config(text=f"Ajout terminé: {corrections_made} provinces", 
+                                foreground="#a6e3a1")
+        self._sc_add_button.config(state="disabled")
+
+        messagebox.showinfo("State Check", 
+            f"{corrections_made} province(s) ajoutée(s) aux fichiers state_regions.\n"
+            f"Sauvegardes créées si cochée.")
