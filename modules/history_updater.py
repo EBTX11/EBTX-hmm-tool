@@ -178,7 +178,9 @@ def _update_file(path, modified_states, proportions_map, new_owners_map, file_ty
             parts.append(content[i:j])
         i = j
     if changed:
-        shutil.copy(path, path + '.backup')
+        _bkdir = os.path.join(os.path.dirname(path), "_backup")
+        os.makedirs(_bkdir, exist_ok=True)
+        shutil.copy(path, os.path.join(_bkdir, os.path.basename(path)))
         with open(path, 'w', encoding='utf-8-sig') as f:
             f.write(''.join(parts))
     return changed

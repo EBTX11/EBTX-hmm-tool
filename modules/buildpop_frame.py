@@ -1159,7 +1159,9 @@ class BuildPopFrame(ttk.Frame):
         if os.path.exists(path):
             with open(path, 'r', encoding='utf-8-sig') as f:
                 content = f.read()
-            shutil.copy(path, path + '.backup')
+            _bkdir = os.path.join(os.path.dirname(path), "_backup")
+            os.makedirs(_bkdir, exist_ok=True)
+            shutil.copy(path, os.path.join(_bkdir, os.path.basename(path)))
 
         T = '\t'
         lines = [f"{T}s:{state} = {{"]
@@ -1213,7 +1215,9 @@ class BuildPopFrame(ttk.Frame):
         if os.path.exists(path):
             with open(path, 'r', encoding='utf-8-sig') as f:
                 content = f.read()
-            shutil.copy(path, path + '.backup')
+            _bkdir = os.path.join(os.path.dirname(path), "_backup")
+            os.makedirs(_bkdir, exist_ok=True)
+            shutil.copy(path, os.path.join(_bkdir, os.path.basename(path)))
 
         T = '\t'
         lines = [f"{T}s:{state} = {{"]

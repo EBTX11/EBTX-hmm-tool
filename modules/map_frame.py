@@ -1059,7 +1059,9 @@ class MapFrame(ttk.Frame):
         if not os.path.exists(states_path):
             messagebox.showerror("Erreur", f"Fichier introuvable:\n{states_path}")
             return
-        shutil.copy(states_path, states_path + ".backup")
+        _bkdir = os.path.join(os.path.dirname(states_path), "_backup")
+        os.makedirs(_bkdir, exist_ok=True)
+        shutil.copy(states_path, os.path.join(_bkdir, os.path.basename(states_path)))
         self._update_hc_in_file(states_path, state)
         self._hl_var.set("")
         self._cl_entry.set("")
@@ -1186,7 +1188,9 @@ class MapFrame(ttk.Frame):
             return
         states_snapshot = set(self._modified_states)
         substates_snapshot = {k: set(v) for k, v in self._substates.items()}
-        shutil.copy(states_path, states_path + ".backup")
+        _bkdir = os.path.join(os.path.dirname(states_path), "_backup")
+        os.makedirs(_bkdir, exist_ok=True)
+        shutil.copy(states_path, os.path.join(_bkdir, os.path.basename(states_path)))
         self._rebuild_states_file(states_path)
         try:
             updated_files = update_history_files(mod, states_snapshot, substates_snapshot)

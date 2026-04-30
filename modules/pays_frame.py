@@ -1094,30 +1094,99 @@ class PaysFrame(ttk.Frame):
             widget.destroy()
         self._law_vars.clear()
 
-        COLS = 3
-        groups = sorted(self._law_groups.keys())
+        COLUMN_GROUPS = [
+            ("Power Structure", [
+                "lawgroup_governance_principles",
+                "lawgroup_distribution_of_power",
+                "lawgroup_citizenship",
+                "lawgroup_church_and_state",
+                "lawgroup_bureaucracy",
+                "lawgroup_army_model",
+                "lawgroup_navy_model",
+                "lawgroup_internal_security",
+                "lawgroup_currency",
+                "lawgroup_caste_hegemony",
+                "lawgroup_edo_social_system",
+            ]),
+            ("Economy", [
+                "lawgroup_economic_system",
+                "lawgroup_trade_policy",
+                "lawgroup_taxation",
+                "lawgroup_land_reform",
+                "lawgroup_colonization",
+                "lawgroup_policing",
+                "lawgroup_education_system",
+                "lawgroup_health_system",
+                "lawgroup_monetary_policy",
+            ]),
+            ("Human Rights", [
+                "lawgroup_free_speech",
+                "lawgroup_labor_rights",
+                "lawgroup_childrens_rights",
+                "lawgroup_rights_of_women",
+                "lawgroup_welfare",
+                "lawgroup_migration",
+                "lawgroup_slavery",
+                "lawgroup_labour_associations",
+            ]),
+        ]
 
-        for col in range(COLS):
+        known = {g for _, grps in COLUMN_GROUPS for g in grps}
+        extra = sorted(g for g in self._law_groups if g not in known)
+
+        for col in range(3):
             self._law_scroll_frame.columnconfigure(col, weight=1, uniform="law_col")
 
-        for i, group in enumerate(groups):
-            col = i % COLS
-            row_idx = i // COLS
+        # En-têtes de catégorie
+        for col, (title, _) in enumerate(COLUMN_GROUPS):
+            ttk.Label(self._law_scroll_frame, text=title,
+                      font=("Segoe UI", 9, "bold"), foreground="#ddd",
+                      anchor="center").grid(row=0, column=col, sticky="ew", padx=4, pady=(6, 2))
+        ttk.Separator(self._law_scroll_frame, orient="horizontal").grid(
+            row=1, column=0, columnspan=3, sticky="ew", padx=4, pady=2)
 
-            cell = ttk.Frame(self._law_scroll_frame, padding=(8, 4))
-            cell.grid(row=row_idx, column=col, sticky="ew", padx=4, pady=3)
+        # Lois par colonne
+        max_rows = max(len(grps) for _, grps in COLUMN_GROUPS)
+        for row_off in range(max_rows):
+            for col, (_, grps) in enumerate(COLUMN_GROUPS):
+                if row_off >= len(grps):
+                    continue
+                group = grps[row_off]
+                if group not in self._law_groups:
+                    continue
+                cell = ttk.Frame(self._law_scroll_frame, padding=(8, 4))
+                cell.grid(row=row_off + 2, column=col, sticky="ew", padx=4, pady=3)
+                label_text = group.replace("lawgroup_", "").replace("_", " ").title()
+                ttk.Label(cell, text=label_text, font=("Segoe UI", 8, "bold"),
+                          foreground="#aaa").pack(anchor="w")
+                var = tk.StringVar()
+                self._law_vars[group] = var
+                values = ["(aucune)"] + self._law_groups[group]
+                cb = ttk.Combobox(cell, textvariable=var, values=values,
+                                  state="readonly", font=("Segoe UI", 9))
+                cb.pack(fill="x")
+                var.set("(aucune)")
 
-            label_text = group.replace("lawgroup_", "").replace("_", " ").title()
-            ttk.Label(cell, text=label_text, font=("Segoe UI", 8, "bold"),
-                      foreground="#aaa").pack(anchor="w")
-
-            var = tk.StringVar()
-            self._law_vars[group] = var
-            values = ["(aucune)"] + self._law_groups[group]
-            cb = ttk.Combobox(cell, textvariable=var, values=values,
-                              state="readonly", font=("Segoe UI", 9))
-            cb.pack(fill="x")
-            var.set("(aucune)")
+        # Groupes supplémentaires non présents dans la liste prédéfinie
+        if extra:
+            base_row = max_rows + 3
+            ttk.Separator(self._law_scroll_frame, orient="horizontal").grid(
+                row=base_row - 1, column=0, columnspan=3, sticky="ew", padx=4, pady=2)
+            for i, group in enumerate(extra):
+                col = i % 3
+                row_idx = base_row + i // 3
+                cell = ttk.Frame(self._law_scroll_frame, padding=(8, 4))
+                cell.grid(row=row_idx, column=col, sticky="ew", padx=4, pady=3)
+                label_text = group.replace("lawgroup_", "").replace("_", " ").title()
+                ttk.Label(cell, text=label_text, font=("Segoe UI", 8, "bold"),
+                          foreground="#aaa").pack(anchor="w")
+                var = tk.StringVar()
+                self._law_vars[group] = var
+                values = ["(aucune)"] + self._law_groups[group]
+                cb = ttk.Combobox(cell, textvariable=var, values=values,
+                                  state="readonly", font=("Segoe UI", 9))
+                cb.pack(fill="x")
+                var.set("(aucune)")
 
     def _load_country_laws(self):
         mod = self.config.mod_path
@@ -2216,10 +2285,10 @@ class PaysFrame(ttk.Frame):
         self._mil_sr_combo.pack(side="left", padx=(0, 8))
         self._mil_sr_combo.bind("<<ComboboxSelected>>", self._mil_on_sr_selected)
 
-        row2 = ttk.Frame(create_lf)
-        row2.pack(fill="x", pady=3)
-        ttk.Label(row2, text="Target State:", width=14, anchor="w").pack(side="left")
-        self._mil_state_combo = ttk.Combobox(row2, textvariable=self._mil_state_var,
+        self._mil_state_row = ttk.Frame(create_lf)
+        self._mil_state_row.pack(fill="x", pady=3)
+        ttk.Label(self._mil_state_row, text="Target State:", width=14, anchor="w").pack(side="left")
+        self._mil_state_combo = ttk.Combobox(self._mil_state_row, textvariable=self._mil_state_var,
                                              width=30, state="readonly")
         self._mil_state_combo.pack(side="left", padx=(0, 8))
 
@@ -2348,6 +2417,65 @@ class PaysFrame(ttk.Frame):
                    command=self._mil_clean_naval_bases).pack(side="left", padx=(0, 4))
         ttk.Button(btn_bld, text="Clean All",
                    command=self._mil_delete_all_buildings_for_tag).pack(side="left")
+
+        # ── Naval Administration Buildings ────────────────────────
+        ttk.Separator(f, orient="horizontal").pack(fill="x", padx=10, pady=(6, 4))
+        naval_lf = ttk.LabelFrame(f, text="Naval Administration Buildings", padding=(10, 6))
+        naval_lf.pack(fill="x", padx=10, pady=(0, 8))
+
+        naval_nb = ttk.Notebook(naval_lf)
+        naval_nb.pack(fill="x")
+
+        # ── Onglet 1 : TAG sélectionné ─────────────────────────
+        tab1 = ttk.Frame(naval_nb, padding=(6, 4))
+        naval_nb.add(tab1, text="Tag sélectionné")
+
+        naval_top = ttk.Frame(tab1)
+        naval_top.pack(fill="x", pady=(0, 4))
+        self._naval_adm_fleet_label = ttk.Label(naval_top,
+            text="Total fleet ships : —  (sélectionne un pays et clique Refresh)",
+            foreground="#aaa")
+        self._naval_adm_fleet_label.pack(side="left")
+        ttk.Button(naval_top, text="Refresh", command=self._naval_adm_refresh).pack(side="right")
+
+        naval_body = ttk.Frame(tab1)
+        naval_body.pack(fill="x")
+
+        list_wrap = ttk.Frame(naval_body)
+        list_wrap.pack(side="left", fill="both", expand=True)
+        self._naval_adm_listbox = tk.Listbox(list_wrap, height=5, font=("Segoe UI", 9),
+                                              activestyle="none")
+        _nasb = ttk.Scrollbar(list_wrap, command=self._naval_adm_listbox.yview)
+        self._naval_adm_listbox.configure(yscrollcommand=_nasb.set)
+        self._naval_adm_listbox.pack(side="left", fill="both", expand=True)
+        _nasb.pack(side="right", fill="y")
+
+        naval_btns = ttk.Frame(naval_body)
+        naval_btns.pack(side="left", padx=(10, 0), anchor="n")
+        ttk.Button(naval_btns, text="Generate Naval Administration",
+                   command=self._naval_adm_generate).pack(fill="x", pady=(0, 6))
+        ttk.Button(naval_btns, text="Clean Naval Admin + Naval Base",
+                   command=self._naval_adm_clean).pack(fill="x")
+
+        # ── Onglet 2 : Tous les TAGs (depuis 99_hmm_military_formations.txt) ──
+        tab2 = ttk.Frame(naval_nb, padding=(6, 4))
+        naval_nb.add(tab2, text="Tous les Tags (HMM)")
+
+        ttk.Label(tab2,
+            text="Lit 99_hmm_military_formations.txt, calcule les ships fleet par TAG\n"
+                 "et génère les building_naval_administration pour tous les pays.",
+            foreground="#aaa", font=("Segoe UI", 8)).pack(anchor="w", pady=(0, 6))
+
+        self._naval_adm_all_status = ttk.Label(tab2, text="", foreground="#aaa",
+                                                font=("Segoe UI", 8))
+        self._naval_adm_all_status.pack(anchor="w", pady=(0, 4))
+
+        all_btns = ttk.Frame(tab2)
+        all_btns.pack(anchor="w")
+        ttk.Button(all_btns, text="Generate Naval Admin — Tous les Tags",
+                   command=self._naval_adm_generate_all).pack(side="left", padx=(0, 8))
+        ttk.Button(all_btns, text="Clean Naval Admin + Naval Base — Tous les Tags",
+                   command=self._naval_adm_clean_all).pack(side="left")
 
         if self._selected_country_tag:
             self._mil_tag_var.set(self._selected_country_tag)
@@ -2478,19 +2606,20 @@ class PaysFrame(ttk.Frame):
         if self._mil_type_var.get() == "army":
             self._mil_navy_comp_frame.pack_forget()
             self._mil_army_comp_frame.pack(fill="x")
+            self._mil_state_row.pack(fill="x", pady=3)
         else:
             self._mil_army_comp_frame.pack_forget()
             self._mil_navy_comp_frame.pack(fill="x")
+            self._mil_state_var.set("")
+            self._mil_state_row.pack_forget()
 
     def _mil_refresh_states(self):
         """Charge les états possédés par le tag courant dans le combobox."""
         tag = self._mil_tag_var.get().strip().upper()
         states = self._mil_load_states_for_tag(tag)
         self._mil_state_combo["values"] = states
-        if states:
-            if self._mil_state_var.get() not in states:
-                self._mil_state_var.set(states[0])
-        else:
+        current = self._mil_state_var.get()
+        if current and current not in states:
             self._mil_state_var.set("")
 
     def _mil_load_states_for_tag(self, tag):
@@ -2890,13 +3019,24 @@ class PaysFrame(ttk.Frame):
     
     def _mil_load_formation_details(self, name, fpath):
         """Charge les détails d'une formation depuis le fichier et remplit les champs."""
+        # Réinitialiser tous les champs avant de charger la nouvelle formation
+        self._mil_state_var.set("")
+        self._mil_sr_var.set("")
+        self._mil_infantry_var.set("0")
+        self._mil_artillery_var.set("0")
+        self._mil_cavalry_var.set("0")
+        self._mil_light_ship_var.set("0")
+        self._mil_capital_ship_var.set("0")
+        self._mil_support_ship_var.set("0")
+        self._mil_name_var.set(name)
+
         try:
             with open(fpath, "r", encoding="utf-8") as f:
                 content = f.read()
         except Exception as e:
             print(f"Erreur lecture {fpath}: {e}")
             return
-        
+
         tag = self._mil_tag_var.get().strip().upper()
         
         # Chercher le bloc de la formation
@@ -2974,7 +3114,7 @@ class PaysFrame(ttk.Frame):
                     unit_type    = unit_match.group(1)
                     state_region = unit_match.group(2)
                     count        = int(unit_match.group(3))
-                    if state_region and self._mil_state_var.get() != state_region:
+                    if state_region and not self._mil_state_var.get():
                         self._mil_state_var.set(state_region)
                     if "infantry" in unit_type or "line" in unit_type:
                         self._mil_infantry_type_var.set(unit_type)
@@ -3768,6 +3908,433 @@ class PaysFrame(ttk.Frame):
         n2 = self._mil_remove_buildings_all_tags("building_naval_base")
         messagebox.showinfo("OK", f"{n1 + n2} bâtiments militaires supprimés ({n1} barracks, {n2} naval bases) !")
 
+
+    # ── Naval Administration Buildings ─────────────────────────
+
+    def _naval_adm_refresh(self):
+        """Scanne les fichiers buildings pour afficher les naval_administration du tag courant."""
+        tag = self._mil_tag_var.get().strip().upper()
+        self._naval_adm_listbox.delete(0, tk.END)
+
+        total_ships = self._naval_adm_count_fleet_ships(tag)
+        states_count = len(self._mil_load_states_for_tag(tag)) if tag else 0
+        self._naval_adm_fleet_label.config(
+            text=f"Total fleet ships : {total_ships}  →  {total_ships} niveaux à répartir sur {states_count} états"
+        )
+
+        if not tag:
+            return
+
+        mod = self.config.mod_path
+        if not mod:
+            return
+        buildings_dir = os.path.join(mod, "common", "history", "buildings")
+        if not os.path.exists(buildings_dir):
+            self._naval_adm_listbox.insert(tk.END, "(dossier buildings introuvable)")
+            return
+
+        bld_pat = r'building\s*=\s*"?building_naval_administration"?'
+        tag_pat = rf'country\s*=\s*"c:{re.escape(tag)}"'
+        results = {}
+
+        for fname in sorted(os.listdir(buildings_dir)):
+            if not fname.endswith(".txt"):
+                continue
+            fpath = os.path.join(buildings_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as fh:
+                    content = fh.read()
+            except Exception:
+                continue
+
+            for m in re.finditer(r'create_building\s*=\s*\{', content):
+                bs = m.end() - 1
+                depth, be = 1, bs + 1
+                for i in range(bs + 1, len(content)):
+                    if content[i] == '{':
+                        depth += 1
+                    elif content[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            be = i + 1
+                            break
+                block = content[bs:be]
+                if not (re.search(bld_pat, block, re.IGNORECASE) and
+                        re.search(tag_pat, block, re.IGNORECASE)):
+                    continue
+                # Retrouver l'état parent en cherchant en arrière
+                prefix = content[:m.start()]
+                state_m = list(re.finditer(r's:(\w+)\s*=\s*\{', prefix))
+                state_name = state_m[-1].group(1) if state_m else "?"
+                lvl_m = re.search(r'levels\s*=\s*(\d+)', block)
+                lvl = int(lvl_m.group(1)) if lvl_m else 1
+                results[state_name] = results.get(state_name, 0) + lvl
+
+        if results:
+            total_existing = sum(results.values())
+            for state, lvl in sorted(results.items()):
+                self._naval_adm_listbox.insert(tk.END, f"{state} : {lvl}")
+            self._naval_adm_listbox.insert(tk.END, f"── Total existant : {total_existing} ──")
+        else:
+            self._naval_adm_listbox.insert(tk.END, "(aucun building_naval_administration trouvé)")
+
+    def _naval_adm_count_fleet_ships(self, tag):
+        """Retourne la somme de tous les ships dans les formations de type fleet pour ce tag."""
+        if not tag:
+            return 0
+        formations_dir = self._mil_get_formations_dir()
+        if not formations_dir or not os.path.exists(formations_dir):
+            return 0
+        total = 0
+        for fname in os.listdir(formations_dir):
+            if not fname.endswith(".txt") or "example" in fname.lower():
+                continue
+            fpath = os.path.join(formations_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as fh:
+                    content = fh.read()
+            except Exception:
+                continue
+            tag_m = re.search(rf'c:{tag}\s*\??=\s*\{{', content)
+            if not tag_m:
+                continue
+            bs = tag_m.end() - 1
+            depth, te = 0, bs
+            for i in range(bs, len(content)):
+                if content[i] == '{':
+                    depth += 1
+                elif content[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        te = i + 1
+                        break
+            tag_block = content[tag_m.start():te]
+            for fm in re.finditer(r'create_military_formation\s*=\s*\{', tag_block):
+                fs = fm.start()
+                depth2, fe = 0, fs
+                for i in range(fs, len(tag_block)):
+                    if tag_block[i] == '{':
+                        depth2 += 1
+                    elif tag_block[i] == '}':
+                        depth2 -= 1
+                        if depth2 == 0:
+                            fe = i + 1
+                            break
+                fb = tag_block[fs:fe]
+                if re.search(r'type\s*=\s*fleet', fb):
+                    for cm in re.finditer(r'count\s*=\s*(\d+)', fb):
+                        total += int(cm.group(1))
+        return total
+
+    def _naval_adm_remove_for_tag(self, tag):
+        """Supprime building_naval_administration ET building_naval_base pour ce tag."""
+        mod = self.config.mod_path
+        if not mod or not tag:
+            return
+        buildings_dir = os.path.join(mod, "common", "history", "buildings")
+        if not os.path.exists(buildings_dir):
+            return
+        patterns = [
+            r'building\s*=\s*"?building_naval_administration"?',
+            r'building\s*=\s*"?building_naval_base"?',
+        ]
+        tag_pat = rf'country\s*=\s*"c:{re.escape(tag)}"'
+        for fname in os.listdir(buildings_dir):
+            if not fname.endswith(".txt"):
+                continue
+            fpath = os.path.join(buildings_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as fh:
+                    content = fh.read()
+            except Exception:
+                continue
+            to_remove = []
+            for m in re.finditer(r'create_building\s*=\s*\{', content):
+                bs = m.end() - 1
+                depth, be = 1, bs + 1
+                for i in range(bs + 1, len(content)):
+                    if content[i] == '{':
+                        depth += 1
+                    elif content[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            be = i + 1
+                            break
+                block = content[bs:be]
+                if (any(re.search(p, block, re.IGNORECASE) for p in patterns) and
+                        re.search(tag_pat, block, re.IGNORECASE)):
+                    to_remove.append((m.start(), be))
+            if to_remove:
+                for s, e in reversed(to_remove):
+                    content = content[:s] + content[e:]
+                content = re.sub(r'\n\s*\n\s*\n+', '\n\n', content)
+                with open(fpath, "w", encoding="utf-8") as fh:
+                    fh.write(content)
+
+    def _naval_adm_create_building(self, tag, state, levels):
+        """Crée un bloc building_naval_administration dans le fichier buildings approprié."""
+        fpath = self._mil_get_building_file(state)
+        if not fpath:
+            return
+        if os.path.exists(fpath):
+            with open(fpath, "r", encoding="utf-8") as fh:
+                content = fh.read()
+        else:
+            content = "BUILDINGS = {\n}\n"
+
+        building_block = (
+            f'\n\t\t\tcreate_building={{\n'
+            f'\t\t\t\tbuilding="building_naval_administration"\n'
+            f'\t\t\t\tadd_ownership={{\n'
+            f'\t\t\t\t\tcountry={{\n'
+            f'\t\t\t\t\t\tcountry="c:{tag}"\n'
+            f'\t\t\t\t\t\tlevels={levels}\n'
+            f'\t\t\t\t\t}}\n'
+            f'\t\t\t\t}}\n'
+            f'\t\t\t\treserves=1\n'
+            f'\t\t\t\tactivate_production_methods={{ "pm_simple_sailor_recruitment" }}\n'
+            f'\t\t\t}}'
+        )
+
+        def find_insert_before_close(text, start_pos):
+            """Retourne la position juste avant le } fermant, en reculant les espaces/tabs."""
+            depth = 0
+            for i in range(start_pos, len(text)):
+                if text[i] == '{':
+                    depth += 1
+                elif text[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        pos = i
+                        while pos > 0 and text[pos - 1] in (' ', '\t'):
+                            pos -= 1
+                        return pos
+            return len(text)
+
+        # Cas 1 : bloc region_state:TAG déjà présent dans s:STATE
+        rs_pat = rf's:{re.escape(state)}\s*=\s*\{{[^}}]*region_state:{re.escape(tag)}\s*=\s*\{{'
+        rs_m = re.search(rs_pat, content, re.DOTALL)
+        if rs_m:
+            ins = find_insert_before_close(content, rs_m.end() - 1)
+            content = content[:ins] + building_block + '\n' + content[ins:]
+        else:
+            # Cas 2 : bloc s:STATE présent mais pas region_state:TAG
+            s_pat = rf's:{re.escape(state)}\s*=\s*\{{'
+            s_m = re.search(s_pat, content)
+            if s_m:
+                ins = find_insert_before_close(content, s_m.end() - 1)
+                region_block = f'\n\t\tregion_state:{tag} = {{{building_block}\n\t\t}}'
+                content = content[:ins] + region_block + '\n' + content[ins:]
+            else:
+                # Cas 3 : créer s:STATE + region_state:TAG dans BUILDINGS
+                b_m = re.search(r'BUILDINGS\s*=\s*\{', content)
+                if b_m:
+                    ins = find_insert_before_close(content, b_m.end() - 1)
+                    new_block = (
+                        f'\n\ts:{state} = {{\n'
+                        f'\t\tregion_state:{tag} = {{{building_block}\n'
+                        f'\t\t}}\n'
+                        f'\t}}'
+                    )
+                    content = content[:ins] + new_block + '\n' + content[ins:]
+                else:
+                    content += (
+                        f'\nBUILDINGS = {{\n'
+                        f'\ts:{state} = {{\n'
+                        f'\t\tregion_state:{tag} = {{{building_block}\n'
+                        f'\t\t}}\n'
+                        f'\t}}\n'
+                        f'}}\n'
+                    )
+
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        with open(fpath, "w", encoding="utf-8") as fh:
+            fh.write(content)
+
+    def _naval_adm_generate(self):
+        """Supprime les naval_admin existants et en génère de nouveaux selon le nombre de ships fleet."""
+        tag = self._mil_tag_var.get().strip().upper()
+        if not tag:
+            messagebox.showerror("Erreur", "Sélectionne un pays d'abord")
+            return
+        total_ships = self._naval_adm_count_fleet_ships(tag)
+        if total_ships == 0:
+            messagebox.showinfo("Info", f"Aucun ship trouvé dans les formations fleet de {tag}")
+            return
+        states = self._mil_load_states_for_tag(tag)
+        if not states:
+            messagebox.showerror("Erreur", f"Aucun état trouvé pour {tag}")
+            return
+        if not messagebox.askyesno("Confirmer",
+                f"Générer {total_ships} building_naval_administration pour {tag}\n"
+                f"répartis sur {len(states)} états ?\n\n"
+                "Les building_naval_administration et building_naval_base existants seront supprimés."):
+            return
+        self._naval_adm_remove_for_tag(tag)
+        n = len(states)
+        base, remainder = divmod(total_ships, n)
+        for i, state in enumerate(states):
+            lvl = base + (1 if i < remainder else 0)
+            if lvl > 0:
+                self._naval_adm_create_building(tag, state, lvl)
+        messagebox.showinfo("OK",
+            f"{total_ships} building_naval_administration créés pour {tag}\n"
+            f"sur {n} états ({base}–{base + (1 if remainder else 0)} par état)")
+        self._naval_adm_refresh()
+
+    def _naval_adm_clean(self):
+        """Supprime tous les building_naval_administration et building_naval_base du tag."""
+        tag = self._mil_tag_var.get().strip().upper()
+        if not tag:
+            messagebox.showerror("Erreur", "Sélectionne un pays d'abord")
+            return
+        if not messagebox.askyesno("Confirmer",
+                f"Supprimer tous les building_naval_administration ET building_naval_base pour {tag} ?"):
+            return
+        self._naval_adm_remove_for_tag(tag)
+        messagebox.showinfo("OK", "Nettoyage terminé")
+        self._naval_adm_refresh()
+
+    def _naval_adm_count_all_fleet_ships_from_hmm(self):
+        """Lit 99_hmm_military_formations.txt et retourne {TAG: total_ships} pour chaque fleet."""
+        mod = self.config.mod_path
+        if not mod:
+            return {}
+        fpath = os.path.join(mod, "common", "history", "military_formations",
+                             "99_hmm_military_formations.txt")
+        if not os.path.exists(fpath):
+            return {}
+        try:
+            with open(fpath, "r", encoding="utf-8") as fh:
+                content = fh.read()
+        except Exception:
+            return {}
+
+        result = {}
+        # Chercher chaque bloc c:TAG ?= { ... }
+        for tag_m in re.finditer(r'c:(\w+)\s*\??=\s*\{', content):
+            tag = tag_m.group(1)
+            bs = tag_m.end() - 1
+            depth, te = 0, bs
+            for i in range(bs, len(content)):
+                if content[i] == '{':
+                    depth += 1
+                elif content[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        te = i + 1
+                        break
+            tag_block = content[bs:te]
+            total = 0
+            for fm in re.finditer(r'create_military_formation\s*=\s*\{', tag_block):
+                fs = fm.start()
+                depth2, fe = 0, fs
+                for i in range(fs, len(tag_block)):
+                    if tag_block[i] == '{':
+                        depth2 += 1
+                    elif tag_block[i] == '}':
+                        depth2 -= 1
+                        if depth2 == 0:
+                            fe = i + 1
+                            break
+                fb = tag_block[fs:fe]
+                if re.search(r'type\s*=\s*fleet', fb):
+                    for cm in re.finditer(r'count\s*=\s*(\d+)', fb):
+                        total += int(cm.group(1))
+            if total > 0:
+                result[tag] = result.get(tag, 0) + total
+        return result
+
+    def _naval_adm_remove_all_tags(self):
+        """Supprime building_naval_administration ET building_naval_base pour TOUS les tags."""
+        mod = self.config.mod_path
+        if not mod:
+            return
+        buildings_dir = os.path.join(mod, "common", "history", "buildings")
+        if not os.path.exists(buildings_dir):
+            return
+        patterns = [
+            r'building\s*=\s*"?building_naval_administration"?',
+            r'building\s*=\s*"?building_naval_base"?',
+        ]
+        for fname in os.listdir(buildings_dir):
+            if not fname.endswith(".txt"):
+                continue
+            fpath = os.path.join(buildings_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as fh:
+                    content = fh.read()
+            except Exception:
+                continue
+            to_remove = []
+            for m in re.finditer(r'create_building\s*=\s*\{', content):
+                bs = m.end() - 1
+                depth, be = 1, bs + 1
+                for i in range(bs + 1, len(content)):
+                    if content[i] == '{':
+                        depth += 1
+                    elif content[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            be = i + 1
+                            break
+                block = content[bs:be]
+                if any(re.search(p, block, re.IGNORECASE) for p in patterns):
+                    to_remove.append((m.start(), be))
+            if to_remove:
+                for s, e in reversed(to_remove):
+                    content = content[:s] + content[e:]
+                content = re.sub(r'\n\s*\n\s*\n+', '\n\n', content)
+                with open(fpath, "w", encoding="utf-8") as fh:
+                    fh.write(content)
+
+    def _naval_adm_generate_all(self):
+        """Génère les naval_administration pour tous les TAGs depuis 99_hmm_military_formations.txt."""
+        ships_by_tag = self._naval_adm_count_all_fleet_ships_from_hmm()
+        if not ships_by_tag:
+            messagebox.showerror("Erreur",
+                "Aucun fleet trouvé dans 99_hmm_military_formations.txt\n"
+                "(vérifiez que le fichier existe et que le mod est configuré)")
+            return
+
+        summary = "\n".join(f"  {t}: {n} ships" for t, n in sorted(ships_by_tag.items()))
+        if not messagebox.askyesno("Confirmer",
+                f"Générer les building_naval_administration pour :\n{summary}\n\n"
+                "Tous les naval_administration et naval_base existants seront supprimés."):
+            return
+
+        self._naval_adm_all_status.config(text="Nettoyage en cours…")
+        self._naval_adm_all_status.update()
+        self._naval_adm_remove_all_tags()
+
+        done, total_bld = 0, 0
+        for tag, total_ships in ships_by_tag.items():
+            states = self._mil_load_states_for_tag(tag)
+            if not states:
+                continue
+            n = len(states)
+            base, remainder = divmod(total_ships, n)
+            for i, state in enumerate(states):
+                lvl = base + (1 if i < remainder else 0)
+                if lvl > 0:
+                    self._naval_adm_create_building(tag, state, lvl)
+                    total_bld += lvl
+            done += 1
+
+        self._naval_adm_all_status.config(
+            text=f"✔ {done} pays traités — {total_bld} niveaux créés au total")
+        messagebox.showinfo("OK",
+            f"{done} pays traités\n{total_bld} niveaux de building_naval_administration créés")
+
+    def _naval_adm_clean_all(self):
+        """Supprime building_naval_administration ET building_naval_base pour tous les tags."""
+        if not messagebox.askyesno("Confirmer",
+                "Supprimer TOUS les building_naval_administration et building_naval_base\n"
+                "dans tous les fichiers buildings (tous pays) ?"):
+            return
+        self._naval_adm_remove_all_tags()
+        self._naval_adm_all_status.config(text="✔ Nettoyage terminé")
+        messagebox.showinfo("OK", "Tous les naval_administration et naval_base supprimés")
 
     def _tab_techno_generale(self, nb):
         f = ttk.Frame(nb)

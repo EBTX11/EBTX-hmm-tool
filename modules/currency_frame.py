@@ -164,7 +164,9 @@ class CurrencyFrame(ttk.Frame):
             messagebox.showerror("Erreur", f"Fichier introuvable:\n{file_path}")
             return
 
-        shutil.copy(file_path, file_path + ".backup")
+        _bkdir = os.path.join(os.path.dirname(file_path), "_backup")
+        os.makedirs(_bkdir, exist_ok=True)
+        shutil.copy(file_path, os.path.join(_bkdir, os.path.basename(file_path)))
 
         with open(file_path, "r", encoding="utf-8") as fh:
             content = fh.read()
