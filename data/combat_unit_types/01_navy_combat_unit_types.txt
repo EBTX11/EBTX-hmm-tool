@@ -1,16 +1,25 @@
-﻿### Light Ships
-combat_unit_type_frigate
-combat_unit_type_monitor
-combat_unit_type_destroyer
-combat_unit_type_torpedo_boat
-combat_unit_type_scout_cruiser
-
 ### Capital Ships
-combat_unit_type_man_o_war
-combat_unit_type_ironclad
-combat_unit_type_dreadnought
-combat_unit_type_battleship
+ship_type_ship_of_the_line
+ship_type_monitor
+ship_type_early_ironclad
+ship_type_coastal_defense_ship
+ship_type_modern_ironclad
+ship_type_pre_dreadnought
+ship_type_dreadnought
+ship_type_super_dreadnought
 
-### Support Ships
-combat_unit_type_submarine
-combat_unit_type_carrier
+### Cruisers
+ship_type_frigate
+ship_type_iron_frigate
+ship_type_troop_ship
+ship_type_protected_cruiser
+ship_type_armored_cruiser
+ship_type_light_cruiser
+ship_type_seaplane_tender
+ship_type_aircraft_carrier
+
+### Torpedo Craft
+ship_type_torpedo_boat
+ship_type_torpedo_boat_destroyer
+ship_type_submarine
+ship_type_destroyer

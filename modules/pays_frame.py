@@ -2242,9 +2242,9 @@ class PaysFrame(ttk.Frame):
         inf_types     = land_units.get("Infantry",     ["combat_unit_type_line_infantry"])
         art_types     = land_units.get("Artillery",    ["combat_unit_type_cannon_artillery"])
         cav_types     = land_units.get("Cavalry",      ["combat_unit_type_hussars"])
-        light_types   = navy_units.get("Light Ships",  ["combat_unit_type_frigate"])
-        capital_types = navy_units.get("Capital Ships",["combat_unit_type_man_o_war"])
-        support_types = navy_units.get("Support Ships",["combat_unit_type_submarine"])
+        light_types   = navy_units.get("Cruisers",      ["ship_type_frigate"])
+        capital_types = navy_units.get("Capital Ships", ["ship_type_ship_of_the_line"])
+        support_types = navy_units.get("Torpedo Craft", ["ship_type_torpedo_boat"])
 
         self._mil_infantry_type_var.set(inf_types[0]     if inf_types     else "")
         self._mil_artillery_type_var.set(art_types[0]    if art_types     else "")
@@ -2276,9 +2276,9 @@ class PaysFrame(ttk.Frame):
         # non pack() → caché tant qu'Army est sélectionné
 
         for label, type_var, types_list, count_var in [
-            ("Light Ships:",   self._mil_light_ship_type_var,   light_types,   self._mil_light_ship_var),
             ("Capital Ships:", self._mil_capital_ship_type_var, capital_types, self._mil_capital_ship_var),
-            ("Support Ships:", self._mil_support_ship_type_var, support_types, self._mil_support_ship_var),
+            ("Cruisers:",      self._mil_light_ship_type_var,   light_types,   self._mil_light_ship_var),
+            ("Torpedo Craft:", self._mil_support_ship_type_var, support_types, self._mil_support_ship_var),
         ]:
             r = ttk.Frame(self._mil_navy_comp_frame)
             r.pack(fill="x", pady=2)
@@ -2320,17 +2320,34 @@ class PaysFrame(ttk.Frame):
 
         self._mil_manage_tag = tk.StringVar()
 
-        self._mil_listbox = tk.Listbox(manage_lf, height=8, font=("Segoe UI", 9),
+        # Listbox + scrollbar dans leur propre frame pour pouvoir empiler les boutons dessous
+        list_frame = ttk.Frame(manage_lf)
+        list_frame.pack(fill="both", expand=True)
+
+        self._mil_listbox = tk.Listbox(list_frame, height=12, font=("Segoe UI", 9),
                                         activestyle="none", selectmode=tk.SINGLE)
-        mil_sb = ttk.Scrollbar(manage_lf, command=self._mil_listbox.yview)
+        mil_sb = ttk.Scrollbar(list_frame, command=self._mil_listbox.yview)
         self._mil_listbox.configure(yscrollcommand=mil_sb.set)
         self._mil_listbox.pack(side="left", fill="both", expand=True)
         mil_sb.pack(side="right", fill="y")
         self._mil_listbox.bind("<<ListboxSelect>>", self._mil_on_select)
 
-        # ── Bouton Delete centré sous la liste ──────────────────
+        # ── Boutons sous la listbox ─────────────────────────────
         ttk.Button(manage_lf, text="Delete Formation",
-                   command=self._mil_delete).pack(pady=(6, 0))
+                   command=self._mil_delete).pack(pady=(6, 2))
+
+        ttk.Separator(manage_lf, orient="horizontal").pack(fill="x", pady=(4, 4))
+
+        ttk.Label(manage_lf, text="Buildings", foreground="#666",
+                  font=("Segoe UI", 8)).pack()
+        btn_bld = ttk.Frame(manage_lf)
+        btn_bld.pack(pady=(4, 0))
+        ttk.Button(btn_bld, text="Clean Barracks",
+                   command=self._mil_clean_barracks).pack(side="left", padx=(0, 4))
+        ttk.Button(btn_bld, text="Clean Naval Bases",
+                   command=self._mil_clean_naval_bases).pack(side="left", padx=(0, 4))
+        ttk.Button(btn_bld, text="Clean All",
+                   command=self._mil_delete_all_buildings_for_tag).pack(side="left")
 
         if self._selected_country_tag:
             self._mil_tag_var.set(self._selected_country_tag)
@@ -2528,7 +2545,7 @@ class PaysFrame(ttk.Frame):
         loc_dir = os.path.join(mod, "localization", "english")
         os.makedirs(loc_dir, exist_ok=True)
         yml_path = os.path.join(loc_dir, "00_hmm_military_formation_name_l_english.yml")
-        entry = f' {key}: "{display_name}"\n'
+        entry = f' {key}:0 "{display_name}"\n'
         if os.path.exists(yml_path):
             with open(yml_path, "r", encoding="utf-8-sig") as fh:
                 content = fh.read()
@@ -2615,16 +2632,16 @@ class PaysFrame(ttk.Frame):
             if cavalry:
                 ut = self._mil_cavalry_type_var.get() or "combat_unit_type_hussars"
                 units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {cavalry}\n\t\t\t}}"
-        else:  # navy
-            if light_count:
-                ut = self._mil_light_ship_type_var.get() or "combat_unit_type_frigate"
-                units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {light_count}\n\t\t\t}}"
+        else:  # navy — format: ship = { type = ship_type:XXX count = N }
             if capital_count:
-                ut = self._mil_capital_ship_type_var.get() or "combat_unit_type_man_o_war"
-                units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {capital_count}\n\t\t\t}}"
+                ut = self._mil_capital_ship_type_var.get() or "ship_type_ship_of_the_line"
+                units_str += f"\n\t\t\tship = {{\n\t\t\t\ttype = ship_type:{ut}\n\t\t\t\tcount = {capital_count}\n\t\t\t}}"
+            if light_count:
+                ut = self._mil_light_ship_type_var.get() or "ship_type_frigate"
+                units_str += f"\n\t\t\tship = {{\n\t\t\t\ttype = ship_type:{ut}\n\t\t\t\tcount = {light_count}\n\t\t\t}}"
             if support_count:
-                ut = self._mil_support_ship_type_var.get() or "combat_unit_type_submarine"
-                units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {support_count}\n\t\t\t}}"
+                ut = self._mil_support_ship_type_var.get() or "ship_type_torpedo_boat"
+                units_str += f"\n\t\t\tship = {{\n\t\t\t\ttype = ship_type:{ut}\n\t\t\t\tcount = {support_count}\n\t\t\t}}"
 
         # Générer le bloc au nouveau format
         hq_str = f"sr:{hq_region}" if hq_region else "sr:region_capital"
@@ -2732,9 +2749,11 @@ class PaysFrame(ttk.Frame):
                         elif existing[i] == '}':
                             depth -= 1
                             if depth == 0:
-                                # Insérer juste avant la fermeture du bloc du tag
-                                insert_pos = i
-                                # Combiner tous les blocs (formation + général + scope)
+                                # Reculer avant les espaces/tabs qui précèdent le }
+                                line_start = i
+                                while line_start > 0 and existing[line_start - 1] in (' ', '\t'):
+                                    line_start -= 1
+                                insert_pos = line_start
                                 full_block = formation_block + general_block + scope_block
                                 existing = existing[:insert_pos] + full_block + existing[insert_pos:]
                                 break
@@ -2751,9 +2770,11 @@ class PaysFrame(ttk.Frame):
                         elif existing[i] == '}':
                             depth -= 1
                             if depth == 0:
-                                # Insérer juste avant la fermeture
-                                insert_pos = i
-                                # Combiner tous les blocs (formation + général + scope)
+                                # Reculer avant les espaces/tabs qui précèdent le }
+                                line_start = i
+                                while line_start > 0 and existing[line_start - 1] in (' ', '\t'):
+                                    line_start -= 1
+                                insert_pos = line_start
                                 full_block = formation_block + general_block + scope_block
                                 tag_block = f"\n\tc:{tag} ?= {{{full_block}\t}}\n"
                                 existing = existing[:insert_pos] + tag_block + existing[insert_pos:]
@@ -2915,39 +2936,54 @@ class PaysFrame(ttk.Frame):
             if hq_match:
                 self._mil_sr_var.set(hq_match.group(1))
             
-            # Extraire les combat_units
-            for unit_match in re.finditer(
-                r'combat_unit\s*=\s*\{{[^}}]*?type\s*=\s*unit_type:(\w+)[^}}]*?state_region\s*=\s*s:(\w+)[^}}]*?count\s*=\s*(\d+)',
-                block, re.DOTALL
-            ):
-                unit_type = unit_match.group(1)
-                count = int(unit_match.group(3))
-                
-                # Déterminer si c'est une unité terrestre ou navale
-                land_types = ["line_infantry", "cannon_artillery", "hussars", "dragoons", "cavalry"]
-                navy_types = ["frigate", "man_o_war", "submarine", "ironclad", "steam_frigate"]
-                
-                is_navy = any(ut in unit_type for ut in navy_types)
-                
-                if is_navy:
-                    if "frigate" in unit_type or "light" in unit_type.lower():
-                        self._mil_light_ship_type_var.set(f"combat_unit_type_{unit_type}")
-                        self._mil_light_ship_var.set(str(count))
-                    elif "man_o_war" in unit_type or "capital" in unit_type.lower():
-                        self._mil_capital_ship_type_var.set(f"combat_unit_type_{unit_type}")
+            # Extraire les unités selon le type de formation
+            _capital_kw = ["ship_of_the_line", "monitor", "early_ironclad", "coastal_defense_ship",
+                           "modern_ironclad", "pre_dreadnought", "dreadnought", "super_dreadnought",
+                           "man_o_war", "ironclad", "battleship"]
+            _cruiser_kw = ["frigate", "iron_frigate", "troop_ship", "protected_cruiser",
+                           "armored_cruiser", "light_cruiser", "seaplane_tender", "aircraft_carrier",
+                           "scout_cruiser"]
+            _torpedo_kw = ["torpedo_boat", "torpedo_boat_destroyer", "submarine", "destroyer",
+                           "carrier"]
+
+            formation_type = self._mil_type_var.get()
+
+            if formation_type == "navy":
+                # Nouveau format naval: ship = { type = ship_type:XXX count = N }
+                for ship_m in re.finditer(
+                    r'ship\s*=\s*\{[^}]*?type\s*=\s*ship_type:(\w+)[^}]*?count\s*=\s*(\d+)',
+                    block, re.DOTALL
+                ):
+                    ship_type = ship_m.group(1)
+                    count     = int(ship_m.group(2))
+                    if any(kw in ship_type for kw in _capital_kw):
+                        self._mil_capital_ship_type_var.set(ship_type)
                         self._mil_capital_ship_var.set(str(count))
+                    elif any(kw in ship_type for kw in _cruiser_kw):
+                        self._mil_light_ship_type_var.set(ship_type)
+                        self._mil_light_ship_var.set(str(count))
                     else:
-                        self._mil_support_ship_type_var.set(f"combat_unit_type_{unit_type}")
+                        self._mil_support_ship_type_var.set(ship_type)
                         self._mil_support_ship_var.set(str(count))
-                else:
+            else:
+                # Format terrestre: combat_unit = { type = unit_type:XXX state_region = s:XXX count = N }
+                for unit_match in re.finditer(
+                    r'combat_unit\s*=\s*\{[^}]*?type\s*=\s*unit_type:(\w+)[^}]*?state_region\s*=\s*s:(\w+)[^}]*?count\s*=\s*(\d+)',
+                    block, re.DOTALL
+                ):
+                    unit_type    = unit_match.group(1)
+                    state_region = unit_match.group(2)
+                    count        = int(unit_match.group(3))
+                    if state_region and self._mil_state_var.get() != state_region:
+                        self._mil_state_var.set(state_region)
                     if "infantry" in unit_type or "line" in unit_type:
-                        self._mil_infantry_type_var.set(f"combat_unit_type_{unit_type}")
+                        self._mil_infantry_type_var.set(unit_type)
                         self._mil_infantry_var.set(str(count))
                     elif "artillery" in unit_type or "cannon" in unit_type:
-                        self._mil_artillery_type_var.set(f"combat_unit_type_{unit_type}")
+                        self._mil_artillery_type_var.set(unit_type)
                         self._mil_artillery_var.set(str(count))
                     else:
-                        self._mil_cavalry_type_var.set(f"combat_unit_type_{unit_type}")
+                        self._mil_cavalry_type_var.set(unit_type)
                         self._mil_cavalry_var.set(str(count))
             
             # Charger le nom depuis la localisation
@@ -2956,7 +2992,7 @@ class PaysFrame(ttk.Frame):
             if os.path.exists(loc_path):
                 with open(loc_path, "r", encoding="utf-8-sig") as f:
                     loc = f.read()
-                name_match = re.search(rf'^\s*{re.escape(name)}:0\s+"([^"]*)"', loc, re.MULTILINE)
+                name_match = re.search(rf'^\s*{re.escape(name)}(?::0)?\s+"([^"]*)"', loc, re.MULTILINE)
                 if name_match:
                     self._mil_name_var.set(name_match.group(1))
                 else:
@@ -3018,18 +3054,19 @@ class PaysFrame(ttk.Frame):
     def _mil_update(self):
         """Met à jour la formation sélectionnée avec les valeurs des champs actuels."""
         sel = self._mil_listbox.curselection()
-        if not sel:
+        idx = sel[0] if sel else self._mil_selected_idx
+        if idx is None:
             messagebox.showerror("Erreur", "Sélectionne une formation")
             return
-        
+
         tag = self._mil_tag_var.get().strip().upper()
         name = self._mil_name_var.get().strip()
         if not tag or not name:
             messagebox.showerror("Erreur", "Country Tag et Formation Name sont obligatoires")
             return
-        
+
         # Récupérer l'ancienne formation
-        old_formation = self._mil_formations[sel[0]]
+        old_formation = self._mil_formations[idx]
         old_name = old_formation["name"]
         fpath = old_formation["file"]
         
@@ -3098,12 +3135,12 @@ class PaysFrame(ttk.Frame):
                 with open(loc_path, "r", encoding="utf-8-sig") as f:
                     loc_content = f.read()
                 # Remplacer le nom dans la localisation
-                old_name_match = re.search(rf'^\s*{re.escape(old_name)}:0\s+"([^"]*)"', loc_content, re.MULTILINE)
+                old_name_match = re.search(rf'^\s*{re.escape(old_name)}(?::0)?\s+"([^"]*)"', loc_content, re.MULTILINE)
                 if old_name_match:
                     old_display = old_name_match.group(1)
                     if old_display != new_display_name:
                         loc_content = re.sub(
-                            rf'^\s*{re.escape(old_name)}:0\s+".*"$',
+                            rf'^\s*{re.escape(old_name)}(?::0)?\s+".*"$',
                             f' {old_name}:0 "{new_display_name}"',
                             loc_content, flags=re.MULTILINE
                         )
@@ -3128,16 +3165,16 @@ class PaysFrame(ttk.Frame):
                 if cavalry:
                     ut = self._mil_cavalry_type_var.get() or "combat_unit_type_hussars"
                     units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {cavalry}\n\t\t\t}}"
-            else:  # navy
-                if light_count:
-                    ut = self._mil_light_ship_type_var.get() or "combat_unit_type_frigate"
-                    units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {light_count}\n\t\t\t}}"
+            else:  # navy — format: ship = { type = ship_type:XXX count = N }
                 if capital_count:
-                    ut = self._mil_capital_ship_type_var.get() or "combat_unit_type_man_o_war"
-                    units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {capital_count}\n\t\t\t}}"
+                    ut = self._mil_capital_ship_type_var.get() or "ship_type_ship_of_the_line"
+                    units_str += f"\n\t\t\tship = {{\n\t\t\t\ttype = ship_type:{ut}\n\t\t\t\tcount = {capital_count}\n\t\t\t}}"
+                if light_count:
+                    ut = self._mil_light_ship_type_var.get() or "ship_type_frigate"
+                    units_str += f"\n\t\t\tship = {{\n\t\t\t\ttype = ship_type:{ut}\n\t\t\t\tcount = {light_count}\n\t\t\t}}"
                 if support_count:
-                    ut = self._mil_support_ship_type_var.get() or "combat_unit_type_submarine"
-                    units_str += f"\n\t\t\tcombat_unit = {{\n\t\t\t\ttype = unit_type:{ut}\n\t\t\t\tstate_region = s:{state_code}\n\t\t\t\tcount = {support_count}\n\t\t\t}}"
+                    ut = self._mil_support_ship_type_var.get() or "ship_type_torpedo_boat"
+                    units_str += f"\n\t\t\tship = {{\n\t\t\t\ttype = ship_type:{ut}\n\t\t\t\tcount = {support_count}\n\t\t\t}}"
             
             # Générer le nouveau bloc (avec save_scope_as pour conserver le lien avec le personnage)
             hq_str = f"sr:{hq_region}" if hq_region else "sr:region_capital"
@@ -3163,6 +3200,13 @@ class PaysFrame(ttk.Frame):
 
             messagebox.showinfo("OK", f"Formation '{new_display_name}' mise à jour !")
             self._mil_load_formations()
+            # Re-sélectionner la formation mise à jour
+            for i, f in enumerate(self._mil_formations):
+                if f["name"] == loc_key:
+                    self._mil_listbox.selection_set(i)
+                    self._mil_listbox.see(i)
+                    self._mil_on_select()
+                    break
         else:
             # Ancien format - essayer de mettre à jour
             old_pattern = rf'create_(?:army|navy)\s*=\s*\{{[^}}]*?name\s*=\s*"{re.escape(old_name)}"'
@@ -3412,7 +3456,7 @@ class PaysFrame(ttk.Frame):
 
         # Pattern bâtiment
         if "barrack" in building_type:
-            building_pattern = r'building\s*=\s*"?building_barracks?"?'
+            building_pattern = r'building\s*=\s*"?building_barrack"?'
         else:
             building_pattern = r'building\s*=\s*"?building_naval_base"?'
 
@@ -3494,11 +3538,10 @@ class PaysFrame(ttk.Frame):
             content = f.read()
         
         # Déterminer le pattern de recherche selon le type de bâtiment
-        # building_barracks (avec s) ou building_naval_base
         if "barrack" in building_type:
-            building_pattern = r'building[_"a-z]*barracks?'
+            building_pattern = r'building\s*=\s*"?building_barrack"?'
         else:
-            building_pattern = r'building[_"a-z]*naval[_"a-z]*base?'
+            building_pattern = r'building\s*=\s*"?building_naval_base"?'
         
         # Chercher tous les bâtiments militaires existants pour ce tag dans cet état
         # et calculer le niveau total actuel
@@ -3644,24 +3687,86 @@ class PaysFrame(ttk.Frame):
         
         print(f"Bâtiment {building_type} pour {tag}/{state}: delta={levels:+d} → levels={new_total_levels}")
 
+    def _mil_remove_buildings_all_tags(self, building_type):
+        """Supprime tous les create_building du type donné dans tous les fichiers, tous TAGs confondus."""
+        mod = self.config.mod_path
+        if not mod:
+            return 0
+
+        buildings_dir = os.path.join(mod, "common", "history", "buildings")
+        if not os.path.exists(buildings_dir):
+            return 0
+
+        if "barrack" in building_type:
+            building_pattern = r'building\s*=\s*"?building_barrack"?'
+        else:
+            building_pattern = r'building\s*=\s*"?building_naval_base"?'
+
+        total_removed = 0
+        for fname in os.listdir(buildings_dir):
+            if not fname.endswith(".txt"):
+                continue
+            fpath = os.path.join(buildings_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception as e:
+                print(f"Erreur lecture {fname}: {e}")
+                continue
+
+            to_remove = []
+            for m in re.finditer(r'create_building\s*=\s*\{', content):
+                block_start = m.start()
+                brace_start = m.end() - 1
+                depth = 1
+                for i in range(brace_start + 1, len(content)):
+                    if content[i] == '{':
+                        depth += 1
+                    elif content[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            block_end = i + 1
+                            break
+                else:
+                    continue
+                block = content[brace_start:block_end]
+                if re.search(building_pattern, block, re.IGNORECASE):
+                    to_remove.append((block_start, block_end))
+
+            if to_remove:
+                for start, end in reversed(to_remove):
+                    content = content[:start] + content[end:]
+                content = re.sub(r'\n\s*\n\s*\n+', '\n\n', content)
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(content)
+                total_removed += len(to_remove)
+
+        return total_removed
+
+    def _mil_clean_barracks(self):
+        """Supprime tous les barracks de tous les pays (tous fichiers buildings)."""
+        if not messagebox.askyesno("Confirmer",
+                "Supprimer TOUS les barracks (tous pays) dans tous les fichiers buildings ?"):
+            return
+        n = self._mil_remove_buildings_all_tags("building_barrack")
+        messagebox.showinfo("OK", f"{n} barracks supprimés dans tous les fichiers !")
+
+    def _mil_clean_naval_bases(self):
+        """Supprime toutes les naval bases de tous les pays (tous fichiers buildings)."""
+        if not messagebox.askyesno("Confirmer",
+                "Supprimer TOUTES les naval bases (tous pays) dans tous les fichiers buildings ?"):
+            return
+        n = self._mil_remove_buildings_all_tags("building_naval_base")
+        messagebox.showinfo("OK", f"{n} naval bases supprimées dans tous les fichiers !")
+
     def _mil_delete_all_buildings_for_tag(self):
-        """Supprime tous les bâtiments militaires (barracks + naval bases) du TAG après confirmation."""
-        tag = self._mil_tag_var.get().strip().upper()
-        if not tag:
-            messagebox.showerror("Erreur", "Sélectionne d'abord un pays")
+        """Supprime tous les bâtiments militaires (barracks + naval bases) de tous les pays."""
+        if not messagebox.askyesno("Confirmer",
+                "Supprimer TOUS les bâtiments militaires (barracks + naval bases, tous pays) ?"):
             return
-        
-        if not messagebox.askyesno("Confirmer", 
-            f"Supprimer TOUS les bâtiments militaires (barracks + naval bases) du pays {tag} dans tous les états ?"):
-            return
-        
-        # Supprimer les barracks
-        self._mil_remove_all_buildings_for_tag(tag, "building_barrack")
-        
-        # Supprimer les naval bases
-        self._mil_remove_all_buildings_for_tag(tag, "building_naval_base")
-        
-        messagebox.showinfo("OK", f"Tous les bâtiments militaires de {tag} ont été supprimés !")
+        n1 = self._mil_remove_buildings_all_tags("building_barrack")
+        n2 = self._mil_remove_buildings_all_tags("building_naval_base")
+        messagebox.showinfo("OK", f"{n1 + n2} bâtiments militaires supprimés ({n1} barracks, {n2} naval bases) !")
 
 
     def _tab_techno_generale(self, nb):

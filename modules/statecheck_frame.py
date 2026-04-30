@@ -712,18 +712,17 @@ class StateCheckFrame(ttk.Frame):
         # Insérer les nouvelles provinces avant la fermeture
         existing_provs = content[prov_line_start:j-1]
 
-        # Parser les provinces existantes (les deux formats: "x123456" et x123456)
-        prov_pat = re.compile(r'"?x[0-9A-Fa-f]{6}"?')
+        # Parser les provinces existantes (les deux formats: "x123456", "X123456", x123456)
+        prov_pat = re.compile(r'"?[xX][0-9A-Fa-f]{6}"?')
         existing_set = set()
         for pm in prov_pat.finditer(existing_provs):
-            p = pm.group(0).strip('"').upper()
-            existing_set.add(p)
+            existing_set.add(pm.group(0).strip('"').upper())
 
-        # Ajouter les provinces manquantes
+        # Ajouter les provinces manquantes au format state_regions : "x26DB64"
         new_provs = []
         for p in provinces_to_add:
-            if p not in existing_set:
-                new_provs.append(f'"{p}"')
+            if p.upper() not in existing_set:
+                new_provs.append(f'"{self._fmt_prov(p)}"')
 
         if new_provs:
             # Insérer les nouvelles provinces
